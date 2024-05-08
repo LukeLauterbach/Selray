@@ -41,6 +41,8 @@ class Colors:
 
 def main(usernames="", passwords="", domain="", domain_after=False, url="", username_field="", password_field="",
          checkbox="", fail="", success="", threads=5, delay=30):
+
+    # Prepare variables
     fail, success = prepare_success_fail(fail=fail, success=success)
     usernames = process_file(usernames)
     passwords = process_file(passwords)
@@ -51,6 +53,7 @@ def main(usernames="", passwords="", domain="", domain_after=False, url="", user
     print_beginning(usernames=usernames, passwords=passwords, domain=domain, domain_after=domain_after, url=url,
                     fail=fail, success=success, threads=threads, delay=delay)
 
+    # Loop through passwords
     i = 0
     while i < len(passwords):
         next_start_time = datetime.now() + timedelta(minutes=delay)
