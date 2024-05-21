@@ -100,7 +100,7 @@ def main(usernames="", passwords="", domain="", domain_after=False, url="", user
 
 def process_queue(queue=None, usernames=None):
     if queue.empty():
-        return
+        return usernames
 
     global valid_credentials
     while not queue.empty():
