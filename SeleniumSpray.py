@@ -386,6 +386,7 @@ def attempt_login(username=None, password="", url="", username_field_key="", use
                   success=None, queue=None, invalid_username=None):
     selenium_options = webdriver.ChromeOptions()
     selenium_options.add_argument('--ignore-certificate-errors')
+    selenium_options.add_argument("--headless")
     driver = webdriver.Chrome(options=selenium_options)
     driver.delete_all_cookies()
     driver.get(url)
