@@ -217,7 +217,7 @@ def print_beginning(usernames=None, passwords=None, domain="", domain_after=Fals
 
 def print_ending():
     global valid_credentials
-    print(f"\nPassword spraying completed at {datetime.now().strftime("%m/%d/%Y %H:%M")}")
+    print(f"\nPassword spraying completed at {datetime.now().strftime('%m/%d/%Y %H:%M')}")
     print(f"Valid Credentials Found: {len(valid_credentials)}")
     if valid_credentials:
         print(f"\nValid Credentials:")
