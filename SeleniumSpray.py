@@ -17,7 +17,7 @@ import pause
 # --------------------------------- #
 
 valid_credentials = []
-__version__ = "0.2"
+__version__ = "0.3"
 
 
 # --------------------------------- #
@@ -235,11 +235,9 @@ def parse_arguments():
     required.add_argument('URL',
                           help="(REQUIRED) URL of the website to spray.")
     optional.add_argument("-d", "--domain",
-                          help="(REQUIRED) Username or file with list of usernames to spray. Alternatively, a list of "
-                               "usernames and passwords can be provided, seperated by a colon (e.g. USER:PASS)")
+                          help="(REQUIRED) Prefix all usernames with a domain (e.g. DOMAIN\\USERNAME)")
     optional.add_argument("-da", "--domain-after", action="store_true",
-                          help="(OPTIONAL) Append domain to the end of the username (e.g. username@domain). By default,"
-                               "the domain is placed before the username (e.g. domain/username).")
+                          help="(OPTIONAL) Append domain to the end of the username (e.g. username@domain)")
     required.add_argument("-p", "--password",
                           help="(OPTIONAL) Password or file with list of usernames to spray.")
     condition.add_argument('-f', '--fail',
