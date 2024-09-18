@@ -487,3 +487,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nCtrl+C Detected")
         print_ending()
+        exit()
