@@ -40,68 +40,19 @@ class Colors:
 # FUNCTIONS                         #
 # --------------------------------- #
 
-def main(usernames="", passwords="", domain="", domain_after=False, url="", username_field="", password_field="",
-         checkbox="", fail="", success="", threads=5, delay=30, invalid_username=""):
-    # Prepare variables
-    fail, success = prepare_success_fail(fail=fail, success=success)
-    usernames = process_file(usernames)
-    if passwords:
-        passwords = process_file(passwords)
-    else:
-        passwords = []
-    usernames = prepare_usernames(usernames, domain, domain_after)
-    url = prepare_url(url)
-    invalid_username = prepare_invalid_username(invalid_username=invalid_username)
-    (username_field_key, username_field_value, password_field_key, password_field_value, checkbox_key,
-     checkbox_value) = prepare_fields(username_field, password_field, checkbox=checkbox)
-    print_beginning(usernames=usernames, passwords=passwords, domain=domain, domain_after=domain_after, url=url,
-                    fail=fail, success=success, threads=threads, delay=delay, username_field=username_field,
-                    password_field=password_field, invalid_username=invalid_username)
+def process_queue(queue=None, usernames=None):
+    if queue.empty():
+        return usernames
+    while not queue.empty():
+        user = queue.get()
+        for i in range(len(usernames) - 1, -1, -1):  # Loop in reverse to avoid index issues
+            if usernames[i]["USERNAME"] == user["USERNAME"]:
+                del usernames[i]
+        if user["VALID"]:
+            global valid_credentials
+            valid_credentials.append({"USERNAME": user["USERNAME"], "PASSWORD": user["PASSWORD"]})
 
-    if not passwords and ":" in usernames[1]:
-        credential_stuffing(usernames, url, fail, success, threads, delay, invalid_username, username_field_key, username_field_value, password_field_key, password_field_value, checkbox_key,
-     checkbox_value)
-    # Loop through passwords
-    password_id = 0
-    while password_id < len(passwords):
-        next_start_time = datetime.now() + timedelta(minutes=delay)  # Check when the next spray should run
-
-        print(f"Beginning spray with password '{passwords[password_id]}'")
-
-        # Spin up processes for each login attempt. Threads could have also been utilized, but Selenium is cleaner with
-        # individual processes.
-        manager = multiprocessing.Manager()
-        queue = manager.Queue()
-        with ProcessPoolExecutor(max_workers=threads) as executor:
-            for username in usernames:
-                processes = executor.submit(attempt_login,
-                                            queue=queue,
-                                            username=username,
-                                            password=passwords[password_id],
-                                            url=url,
-                                            username_field_key=username_field_key,
-                                            username_field_value=username_field_value,
-                                            password_field_key=password_field_key,
-                                            password_field_value=password_field_value,
-                                            checkbox_key=checkbox_key,
-                                            checkbox_value=checkbox_value,
-                                            fail=fail,
-                                            success=success,
-                                            invalid_username=invalid_username)
-            processes.result()
-
-        usernames = process_queue(queue=queue, usernames=usernames)  # Retrieve results from the queue
-
-        # Check to see if the process is at the end. If not, wait the specified time.
-        password_id += 1
-        if password_id < len(passwords):
-            print(f"Spray of password '{passwords[(password_id - 1)]}' complete. Waiting until "
-                  f"{next_start_time.strftime('%H:%M')} to start next spray.")
-            pause.until(next_start_time)
-        else:
-            print(f"Spray of password '{passwords[password_id - 1]}' complete. All passwords complete.")
-
-    print_ending()
+    return usernames
 
 
 def credential_stuffing(usernames, url, fail, success, threads, delay, invalid_username, username_field_key,
@@ -162,21 +113,6 @@ def credential_stuffing(usernames, url, fail, success, threads, delay, invalid_u
         else:
             print(f"Spray of password {stuffing_attempt} of {num_stuffing_attempts} complete. All passwords complete.")
         stuffing_attempt += 1
-
-
-def process_queue(queue=None, usernames=None):
-    if queue.empty():
-        return usernames
-    while not queue.empty():
-        user = queue.get()
-        for i in range(len(usernames) - 1, -1, -1):  # Loop in reverse to avoid index issues
-            if usernames[i]["USERNAME"] == user["USERNAME"]:
-                del usernames[i]
-        if user["VALID"]:
-            global valid_credentials
-            valid_credentials.append({"USERNAME": user["USERNAME"], "PASSWORD": user["PASSWORD"]})
-
-    return usernames
 
 
 def print_beginning(usernames=None, passwords=None, domain="", domain_after=False, url="", invalid_username=None,
@@ -384,7 +320,7 @@ def attempt_login(username=None, password="", url="", username_field_key="", use
                   success=None, queue=None, invalid_username=None):
     selenium_options = webdriver.ChromeOptions()
     selenium_options.add_argument('--ignore-certificate-errors')
-    selenium_options.add_argument("--headless")
+    #selenium_options.add_argument("--headless")
     driver = webdriver.Chrome(options=selenium_options)
     driver.delete_all_cookies()
     driver.get(url)
@@ -465,11 +401,75 @@ def attempt_login(username=None, password="", url="", username_field_key="", use
     if result == "SUCCESS":
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.GREEN}SUCCESS{Colors.END}: {username} - "
               f"{password}")
-        queue.put({"USERNAME": username, "PASSWORD": password, "VALID": True})
+        queue.put({"USERNAME": str(username), "PASSWORD": str(password), "VALID": True})
     else:
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - INVALID: {username} - {password}")
 
     driver.quit()
+
+def main(usernames="", passwords="", domain="", domain_after=False, url="", username_field="", password_field="",
+         checkbox="", fail="", success="", threads=5, delay=30, invalid_username=""):
+    # Prepare variables
+    fail, success = prepare_success_fail(fail=fail, success=success)
+    usernames = process_file(usernames)
+    if passwords:
+        passwords = process_file(passwords)
+    else:
+        passwords = []
+    usernames = prepare_usernames(usernames, domain, domain_after)
+    url = prepare_url(url)
+    invalid_username = prepare_invalid_username(invalid_username=invalid_username)
+    (username_field_key, username_field_value, password_field_key, password_field_value, checkbox_key,
+     checkbox_value) = prepare_fields(username_field, password_field, checkbox=checkbox)
+    print_beginning(usernames=usernames, passwords=passwords, domain=domain, domain_after=domain_after, url=url,
+                    fail=fail, success=success, threads=threads, delay=delay, username_field=username_field,
+                    password_field=password_field, invalid_username=invalid_username)
+
+    if not passwords and ":" in usernames[1]:
+        credential_stuffing(usernames, url, fail, success, threads, delay, invalid_username, username_field_key,
+                            username_field_value, password_field_key, password_field_value, checkbox_key,
+                            checkbox_value)
+    # Loop through passwords
+    password_id = 0
+    while password_id < len(passwords):
+        next_start_time = datetime.now() + timedelta(minutes=delay)  # Check when the next spray should run
+
+        print(f"Beginning spray with password '{passwords[password_id]}'")
+
+        # Spin up processes for each login attempt. Threads could have also been utilized, but Selenium is cleaner with
+        # individual processes.
+        manager = multiprocessing.Manager()
+        queue = manager.Queue()
+        with ProcessPoolExecutor(max_workers=threads) as executor:
+            for username in usernames:
+                processes = executor.submit(attempt_login,
+                                            queue=queue,
+                                            username=username,
+                                            password=str(passwords[password_id]),
+                                            url=url,
+                                            username_field_key=username_field_key,
+                                            username_field_value=username_field_value,
+                                            password_field_key=password_field_key,
+                                            password_field_value=password_field_value,
+                                            checkbox_key=checkbox_key,
+                                            checkbox_value=checkbox_value,
+                                            fail=fail,
+                                            success=success,
+                                            invalid_username=invalid_username)
+            processes.result()
+
+        usernames = process_queue(queue=queue, usernames=usernames)  # Retrieve results from the queue
+
+        # Check to see if the process is at the end. If not, wait the specified time.
+        password_id += 1
+        if password_id < len(passwords):
+            print(f"Spray of password '{passwords[(password_id - 1)]}' complete. Waiting until "
+                  f"{next_start_time.strftime('%H:%M')} to start next spray.")
+            pause.until(next_start_time)
+        else:
+            print(f"Spray of password '{passwords[password_id - 1]}' complete. All passwords complete.")
+
+    print_ending()
 
 
 # --------------------------------- #
