@@ -8,6 +8,7 @@ authors = [
 dependencies = [
     "alive_progress",
     "boto3",
+    "requests",
     "rich",
     "selenium",
     "paramiko",
