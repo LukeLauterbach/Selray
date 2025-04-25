@@ -27,4 +27,4 @@ The following arguments can be provided to change the execution of the script.
 ## Installation
 `pipx install "git+https://github.com/LukeLauterbach/SeleniumSpray"`
 
-You can also 
+You can also install the requirements with `pipx install -r requirements.txt`, and then run `python selray/Selray.py`.

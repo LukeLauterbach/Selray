@@ -11,8 +11,7 @@ from concurrent.futures import ProcessPoolExecutor
 import multiprocessing
 import pause
 from multiprocessing import Process
-from utils import SprayConfig, aws
-from utils import utils
+from selray.utils import SprayConfig, aws, utils
 
 # --------------------------------- #
 # GLOBAL VARIABLES                  #
