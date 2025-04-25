@@ -25,4 +25,6 @@ The following arguments can be provided to change the execution of the script.
 * `-da` - Postfix all usernames with a domain (e.g. USERNAME@DOMAIN)
 
 ## Installation
+`pipx install "git+https://github.com/LukeLauterbach/SeleniumSpray"`
+
 As simple as `pip install -r requirements.txt`.
