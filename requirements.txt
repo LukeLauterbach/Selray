@@ -1,2 +1,6 @@
+alive_progress
+boto3
+rich
 selenium
+paramiko
 pause
