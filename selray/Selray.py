@@ -333,7 +333,8 @@ def attempt_login(spray_config, username, proxy):
 
     driver.quit()
 
-def main(args):
+def main():
+    args = utils.parse_arguments()
     ec2 = aws.get_ec2_session(args.aws_region, args.aws_access_key, args.aws_secret_key, args.aws_session_token)
     if args.proxy_clean:
         utils.list_proxies(args, ec2)
@@ -438,8 +439,7 @@ def perform_spray(spray_config, usernames, proxy):
 
 if __name__ == "__main__":
     try:
-        main_args = utils.parse_arguments()
-        main(main_args)
+        main()
     except KeyboardInterrupt:
         print("\nCtrl+C Detected")
         print_ending()
