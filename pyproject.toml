@@ -17,7 +17,7 @@ dependencies = [
 # If you have local helper modules (e.g., utils.py, aws.py), pipx will still work because they're imported locally.
 
 [project.scripts]
-selray = "selray.__main__:main"
+selray = "selray.Selray:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

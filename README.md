@@ -27,4 +27,4 @@ The following arguments can be provided to change the execution of the script.
 ## Installation
 `pipx install "git+https://github.com/LukeLauterbach/SeleniumSpray"`
 
-As simple as `pip install -r requirements.txt`.
+You can also 
