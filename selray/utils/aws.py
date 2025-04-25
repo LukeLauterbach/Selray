@@ -150,7 +150,7 @@ def proxy_setup(ec2_session, num_proxies=5):
     ssh_key_name = "Selray"
     tasks = ['Creating SSH Keys', 'Creating Security Group', 'Finding AWS OS Image',
              f'Creating {num_proxies} EC2 Instances', 'Setting Up TinyProxy']
-    with alive_bar(len(tasks), title='Starting...', force_tty=True) as bar:
+    with alive_bar(len(tasks), title='Starting...', force_tty=True, transient=True) as bar:
         bar.title(tasks[0])
         if not os.path.exists(f"{ssh_key_name}.pem"):
             create_ssh_key(ec2_session, ssh_key_name)
