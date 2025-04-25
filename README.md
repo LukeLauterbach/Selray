@@ -2,7 +2,7 @@
   <img src="assets/screenshots/selray_logo.png" alt="Selray Logo" width="300">
 </p>
 
-# Selray
+<h1 align="center">Selray</h1>
 
 <p align="center">
   <b>A flexible Selenium-based password spraying tool designed to evade common WAF detections.</b><br>
