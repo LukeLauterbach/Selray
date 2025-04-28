@@ -3,6 +3,7 @@ class SprayConfig:
                  password_field_key, password_field_value, checkbox_key, checkbox_value,
                  fail, success, invalid_username, num_sprays_per_ip, aws_access_key, aws_secret_key,
                  aws_session_token, aws_region):
+        self.username = None
         self.password = None
         self.url = url
         self.username_field_key = username_field_key
