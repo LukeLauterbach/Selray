@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from multiprocessing import Process
+from multiprocessing import Process, Queue
 from selray.utils import SprayConfig, aws, utils
 import pause
 
@@ -19,8 +19,10 @@ def main():
     ec2 = aws.get_ec2_session(args.aws_region, args.aws_access_key, args.aws_secret_key, args.aws_session_token)
     if args.proxy_clean:
         utils.list_proxies(args, ec2)
+        exit()
     elif args.proxy_list:
         utils.list_proxies(args, ec2)
+        exit()
 
     # Prepare variables
     args.fail, args.success = utils.prepare_success_fail(fail=args.fail, success=args.success)
@@ -57,6 +59,8 @@ def main():
         aws_session_token=args.aws_session_token
     )
 
+    results = []
+
     # Perform credential stuffing, if that's what's in store:
     if not args.passwords and ":" in args.usernames[1]:
         utils.credential_stuffing(spray_config, args, proxies)
@@ -74,14 +78,20 @@ def main():
             user_chunks = [args.usernames[i:i + chunk_size] for i in range(0, len(args.usernames), chunk_size)]
 
             processes = []
+            queue = Queue()
             for proxy, user_chunk in zip(proxies, user_chunks):
-                credentials = [{'USERNAME': username, 'PASSWORD': args.passwords[password_id]} for username in user_chunk]
-                p = Process(target=utils.perform_spray, args=(spray_config, credentials, proxy))
+                credentials = [{'USERNAME': username, 'PASSWORD': args.passwords[password_id]} for username in
+                               user_chunk]
+                p = Process(target=utils.perform_spray, args=(spray_config, credentials, proxy, queue))
                 p.start()
                 processes.append(p)
 
             for p in processes:
                 p.join()
+
+            # Gather all results
+            while not queue.empty():
+                results.extend(queue.get())
 
             # Check to see if the process is at the end. If not, wait the specified time.
             password_id += 1
@@ -93,7 +103,7 @@ def main():
                 print(f"Spray of password '{args.passwords[password_id - 1]}' complete. All passwords complete.")
 
     utils.destroy_proxies(args, ec2)
-    utils.print_ending()
+    utils.print_ending(results)
 
 
 # --------------------------------- #
@@ -105,5 +115,5 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\nCtrl+C Detected")
-        utils.print_ending()
+        utils.print_ending([{'USERNAME': '', 'PASSWORD': '', 'RESULT': 'CANCELLED'}])
         exit()
