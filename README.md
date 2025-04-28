@@ -59,9 +59,13 @@ You must also specify either:
 - **`-da {DOMAIN}`** – Postfix a domain to the username(e.g., `USERNAME@DOMAIN`)
 
 ## 🌐 Proxies
-Selray can automatically spin up AWS EC2 proxies.
+Selray can automatically spin up AWS EC2 proxies, rotating the proxy IP addresses and destroying the proxies upon script completion. Selray can also utilize user-provided proxy URLs.
 
-Enable AWS proxy functionality with `--aws`.
+* **`--aws`** - Enable AWS proxy functionality
+- **`--proxies`** - Proxy URLs to proxy traffic through. Can be a file name (CSV or TXT) or a comma-separated list of proxies. If AWS or Azure proxies are also configured, both manually-specified and automatic proxies will be used.
+
+
+If `--aws` and `--proxies` are provided, Selray will use both automatic and manual proxies. 
 
 ### Proxy Options
 - **`-n {INTEGER}`** – Maximum spray attempts per IP (default: 5)

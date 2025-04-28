@@ -72,6 +72,10 @@ def parse_arguments():
                           help="(OPTIONAL) If a checkbox is required, provide a unique attribute of the checkbox, "
                                "allowing the script to automatically check it. For example, if "
                                "'<input type='checkbox'>', enter 'type='checkbox''")
+    optional.add_argument('--proxies', type=str,
+                          help="(OPTIONAL) Proxy URLs to proxy traffic through. Can be a file name (CSV or TXT) or a "
+                               "comma-separated list of proxies. If AWS or Azure proxies are also configured, both "
+                               "manually-specified and automatic proxies will be used.")
 
     aws_group.add_argument('--aws', action='store_true', help="(OPTIONAL) Use AWS proxies. Default is False.")
     aws_group.add_argument('-n','--num_sprays_per_ip', type=int, default=5, help="(OPTIONAL) Number of sprays to perform per IP address. Default is 5.")
@@ -179,7 +183,7 @@ def process_file(filename):
         print("ERROR - CSVs are currently not supported.")
         sys.exit()
     else:
-        return [filename]  # If it isn't a file, just return the username.
+        return [filename]  # If it isn't a file, just return the value
 
 
 def prepare_success_fail(success="", fail=""):
@@ -198,9 +202,19 @@ def prepare_success_fail(success="", fail=""):
 
 
 def prepare_proxies(ec2, args):
+    proxies = []
+    if args.proxies:
+        manual_proxies = process_file(args.proxies)
+        if not manual_proxies:
+            manual_proxies = args.proxies.split(",")
+
+        for manual_proxy in manual_proxies:
+            proxies.append({"type": "MANUAL", "ip": "", "id": None, "url": manual_proxy})
+
     if args.aws:
         proxies = aws.proxy_setup(ec2, args.threads)
-    else:
+
+    if not proxies:
         proxies = [{"type": None, "ip": None, "id": None} for _ in range(args.threads)]
 
     return proxies  # Proxies will always be a list of dicts.
@@ -265,7 +279,7 @@ def perform_spray(spray_config, credentials, proxy, queue):
         if spray_num_with_current_ip >= spray_config.num_sprays_per_ip and proxy['type'] == 'AWS':
             proxy['ip'] = aws.refresh_instance_ip(ec2, proxy['id'])
             spray_num_with_current_ip = 0
-        result = attempt_login(spray_config, proxy['ip'])
+        result = attempt_login(spray_config, proxy['url'])
         results.append(result)
         spray_num_with_current_ip += 1
 
@@ -275,12 +289,12 @@ def perform_spray(spray_config, credentials, proxy, queue):
     queue.put(results)
 
 
-def attempt_login(spray_config, proxy):
+def attempt_login(spray_config, proxy_url):
     selenium_options = webdriver.ChromeOptions()
     selenium_options.add_argument('--ignore-certificate-errors')
     #selenium_options.add_argument("--headless")
     if proxy:
-        selenium_options.add_argument(f'--proxy-server=http://{proxy}:8888')
+        selenium_options.add_argument(f'--proxy-server={proxy_url}')
     driver = webdriver.Chrome(options=selenium_options)
     driver.delete_all_cookies()
     driver.get(spray_config.url)
