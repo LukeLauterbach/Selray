@@ -257,7 +257,7 @@ def create_ec2_instances(ec2_session, ssh_key_name, ami_id, num_proxies=5):
         # Reload to get the public IP address
         instance.reload()
 
-        ec2_instances.append({'type': 'AWS', 'id': instance.id, 'ip': instance.public_ip_address})
+        ec2_instances.append({'type': 'AWS', 'id': instance.id, 'ip': instance.public_ip_address, 'url': f"http://{ip}:8888"})
 
     time.sleep(30)  # Wait a few seconds for the instance to fully initialize
 
