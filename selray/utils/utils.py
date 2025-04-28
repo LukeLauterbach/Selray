@@ -153,15 +153,15 @@ def prepare_usernames(usernames=None, domain="", domain_after=False):
     return usernames
 
 
-def print_ending():
-    global valid_credentials
+def print_ending(results):
     print(f"\nPassword spraying completed at {datetime.now().strftime('%m/%d/%Y %H:%M')}")
-    print(f"Valid Credentials Found: {len(valid_credentials)}")
-    if valid_credentials:
-        print(f"\nValid Credentials:")
-        print(f"------------------")
-        for credential in valid_credentials:
-            print(f"{credential['USERNAME']} - {credential['PASSWORD']}")
+
+    success_count = sum(1 for entry in results if entry.get('RESULT') == 'SUCCESS')
+    if success_count:
+        print(f"Valid Credentials Found: {success_count}")
+        for credential in results:
+            if credential['RESULT'] == 'SUCCESS':
+                print(f"{credential['USERNAME']} - {credential['PASSWORD']}")
 
 
 def import_txt_file(filename):
@@ -209,13 +209,11 @@ def prepare_proxies(ec2, args):
 def destroy_proxies(args, ec2):
     if ec2:
         aws.terminate_instances_in_security_group(ec2, "Selray")
-    exit()
 
 
 def list_proxies(args, ec2):
     if ec2:
         aws.list_instances(ec2, "Selray")
-    exit()
 
 
 def print_beginning(args, version=None):
@@ -253,9 +251,10 @@ def print_beginning(args, version=None):
     print(f"{'Delay:':<28}{args.delay}\n")
 
 
-def perform_spray(spray_config, credentials, proxy):
+def perform_spray(spray_config, credentials, proxy, queue):
     ec2 = aws.get_ec2_session(spray_config.aws_region, spray_config.aws_access_key, spray_config.aws_secret_key,
                               spray_config.aws_session_token)
+    results = []
     spray_num_with_current_ip = 0
     if proxy['type'] == 'AWS':
         proxy['ip'] = aws.start_ec2_instance(ec2, proxy['id'])
@@ -266,11 +265,14 @@ def perform_spray(spray_config, credentials, proxy):
         if spray_num_with_current_ip >= spray_config.num_sprays_per_ip and proxy['type'] == 'AWS':
             proxy['ip'] = aws.refresh_instance_ip(ec2, proxy['id'])
             spray_num_with_current_ip = 0
-        attempt_login(spray_config, proxy['ip'])
+        result = attempt_login(spray_config, proxy['ip'])
+        results.append(result)
         spray_num_with_current_ip += 1
 
     if proxy['type'] == 'AWS':
         aws.stop_ec2_instance(ec2, proxy['id'])
+
+    queue.put(results)
 
 
 def attempt_login(spray_config, proxy):
@@ -355,13 +357,15 @@ def attempt_login(spray_config, proxy):
     elif not result and spray_config.success:
         result = "INVALID"
 
+    driver.quit()
+
     if result == "SUCCESS":
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.GREEN}SUCCESS{Colors.END}: {spray_config.username} - "
               f"{spray_config.password}")
     else:
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - INVALID: {spray_config.username} - {spray_config.password}")
 
-    driver.quit()
+    return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': result}
 
 
 def credential_stuffing(spray_config, args, proxies):
