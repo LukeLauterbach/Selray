@@ -61,6 +61,7 @@ def main():
         aws_secret_key=args.aws_secret_key,
         aws_session_token=args.aws_session_token,
         lockout=args.lockout,
+        threads=args.threads,
     )
 
     results = []

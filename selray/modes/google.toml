@@ -3,3 +3,4 @@ username_field = 'type="email"'
 password_field = 'type="password"'
 fail = "Wrong password"
 invalid_username = "Couldn't find your Google Account"
+threads = 1

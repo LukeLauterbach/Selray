@@ -13,6 +13,7 @@ from selenium.common.exceptions import TimeoutException
 from multiprocessing import Process
 import os
 import toml
+from seleniumbase import Driver
 
 
 class Colors:
@@ -106,7 +107,6 @@ def load_mode_config(args, mode_dir='selray/modes'):
     for key, value in config.items():
         if not getattr(args, key, None):
             setattr(args, key, value)
-
 
 
 def prepare_fields(username_field="", password_field="", checkbox=""):
@@ -319,12 +319,26 @@ def perform_spray(spray_config, credentials, proxy, queue):
 
 
 def attempt_login(spray_config, proxy_url):
-    selenium_options = webdriver.ChromeOptions()
-    selenium_options.add_argument('--ignore-certificate-errors')
-    #selenium_options.add_argument("--headless")
-    if proxy_url:
-        selenium_options.add_argument(f'--proxy-server={proxy_url}')
-    driver = webdriver.Chrome(options=selenium_options)
+    # SeleniumBase with Undetected Chromedriver is a better solution, but doesn't work with multiprocessing out of the
+    #   box. Research needs to be done to properly support multiprocessing. For now, Undetected Chromedriver is used if
+    #   threads is set to 1.
+    if spray_config.threads == 1:
+        selenium_options = ['--ignore-certificate-errors', '--ignore-ssl-errors']
+        if proxy_url:
+            selenium_options.append(f'--proxy-server={proxy_url}')
+        # Initialize the Selenium browser
+        driver = Driver(uc=True,
+                        headless=False,
+                        chromium_arg=selenium_options)
+    else:
+        selenium_options = webdriver.ChromeOptions()
+        selenium_options.add_argument('--ignore-certificate-errors')
+        # selenium_options.add_argument("--headless")
+        if proxy_url:
+            selenium_options.add_argument(f'--proxy-server={proxy_url}')
+        driver = webdriver.Chrome(options=selenium_options)
+
+    driver.set_page_load_timeout(30)
     driver.delete_all_cookies()
     driver.get(spray_config.url)
 
