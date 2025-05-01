@@ -11,8 +11,10 @@ dependencies = [
     "requests",
     "rich",
     "selenium",
+    "seleniumbase",
     "paramiko",
     "pause",
+    "toml"
 ]
 
 # If you have local helper modules (e.g., utils.py, aws.py), pipx will still work because they're imported locally.

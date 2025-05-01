@@ -2,5 +2,7 @@ alive_progress
 boto3
 rich
 selenium
+seleniumbase
 paramiko
 pause
+toml
