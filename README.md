@@ -33,8 +33,17 @@ selray -u usernames.txt -p passwords.txt -dl 60 -uf 'name="username"' -pf 'name=
 ```
 Spray multiple users contained in a file. Attempt multiple passwords from a file, with 60 minutes between each individual password, to avoid an account lockout. Use 10 AWS proxies to bypass IP-based restrictions, and ensure that no more than 10 login attempts ever come from the same IP address.
 
+### Modes
+Selray includes pre-made modes that simplify the process of spraying specific targets. Modes are available in the modes folder and are created using TOML files. Currently, modes are available for:
+* Azure
+* Google
+* Outlook Web Access (still requires `--url`)
+
+A mode can be specified with `-m {NAME}`
+
 ### Requirements
-Each run of the script requires four things:
+If no mode is specified, each run of the script requires four things:
+- **`--url {URL}`** - URL of the website to spray.
 - **`-u {USERNAME/S}`** – A username or file containing usernames. Optionally, a `username:password` list separated by a colon (e.g., `USER:PASS`).
 - **`-p {PASSWORD/S}`** – A password or file containing passwords.
 - **`-uf {USERNAME FIELD IDENTIFIER}`** – An HTML attribute unique to the username field you are trying to spray. In the example below, name="UserName" would be a valid value.
@@ -106,6 +115,9 @@ Or manually:
 pip install -r requirements.txt
 python selray/Selray.py
 ```
+
+## 🐛 Issues
+* #14 - Certain Web Application Firewalls may block Selenium out of the box. 
 
 ## ⚠️ Disclaimer
 This tool is intended for authorized testing and educational purposes only.  
