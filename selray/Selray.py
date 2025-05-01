@@ -25,6 +25,8 @@ def main():
         exit()
 
     # Prepare variables
+    if args.mode:
+        utils.load_mode_config(args)
     args.fail, args.success = utils.prepare_success_fail(fail=args.fail, success=args.success)
     args.usernames = utils.process_file(args.usernames)
     if args.passwords:
@@ -34,6 +36,7 @@ def main():
     args.usernames = utils.prepare_usernames(args.usernames, args.domain, args.domain_after)
     args.url = utils.prepare_url(args.url)
     args.invalid_username = utils.prepare_invalid_username(invalid_username=args.invalid_username)
+    args.lockout = utils.prepare_lockout(lockout_messages=args.lockout)
     (username_field_key, username_field_value, password_field_key, password_field_value, checkbox_key,
      checkbox_value) = utils.prepare_fields(args.username_field, args.password_field, checkbox=args.checkbox)
     utils.print_beginning(args, version=__version__)
@@ -56,7 +59,8 @@ def main():
         aws_region=args.aws_region,
         aws_access_key=args.aws_access_key,
         aws_secret_key=args.aws_secret_key,
-        aws_session_token=args.aws_session_token
+        aws_session_token=args.aws_session_token,
+        lockout=args.lockout,
     )
 
     results = []
