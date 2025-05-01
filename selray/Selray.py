@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from multiprocessing import Process, Queue
-from selray.utils import SprayConfig, aws, utils
+from selray.utils import SprayConfig, aws, utils, update
 import pause
 
 # --------------------------------- #
@@ -23,6 +23,8 @@ def main():
     elif args.proxy_list:
         utils.list_proxies(args, ec2)
         exit()
+    elif args.update:
+        update.self_update()
 
     # Prepare variables
     if args.mode:

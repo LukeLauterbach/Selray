@@ -83,6 +83,8 @@ def parse_arguments():
                           help="(OPTIONAL) Proxy URLs to proxy traffic through. Can be a file name (CSV or TXT) or a "
                                "comma-separated list of proxies. If AWS or Azure proxies are also configured, both "
                                "manually-specified and automatic proxies will be used.")
+    optional.add_argument('--update', action='store_true',
+                          help="(OPTIONAL) Update the script to the latest version (Only works if installed with PIPX).")
 
     aws_group.add_argument('--aws', action='store_true', help="(OPTIONAL) Use AWS proxies. Default is False.")
     aws_group.add_argument('-n','--num_sprays_per_ip', type=int, default=5, help="(OPTIONAL) Number of sprays to perform per IP address. Default is 5.")
