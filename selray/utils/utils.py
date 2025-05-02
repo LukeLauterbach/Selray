@@ -14,6 +14,7 @@ from multiprocessing import Process
 import os
 import toml
 from seleniumbase import Driver
+import importlib.resources
 
 
 class Colors:
@@ -102,9 +103,13 @@ def load_mode_config(args, mode_dir='selray/modes'):
     """
     Loads mode configuration from a TOML file into the args namespace if not already specified.
     """
-    config_path = os.path.join(mode_dir, f"{args.mode.lower()}.toml")
-    with open(config_path, 'r', encoding='utf-8') as f:
-        config = toml.load(f)
+    try:
+        with importlib.resources.files("selray.modes").joinpath(f"{args.mode.lower()}.toml").open("r") as f:
+            config = toml.load(f)
+    except FileNotFoundError:
+        config_path = os.path.join(mode_dir, f"{args.mode.lower()}.toml")
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = toml.load(f)
 
     for key, value in config.items():
         if not getattr(args, key, None):
