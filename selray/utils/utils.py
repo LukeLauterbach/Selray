@@ -60,7 +60,7 @@ def parse_arguments():
                                 "used as an alternative")
 
     optional.add_argument("-m", "--mode", help="Use a pre-built mode, eliminating the need for -uf,-pf,-f,-s, and -i. Mode name should correspond to the file name (minus extension) of a profile in the modes folder.")
-    optional.add_argument('-t', '--threads', type=int, default=5,
+    optional.add_argument('-t', '--threads', type=int,
                           help="(OPTIONAL) Number of threads for passwords spraying. Lower is stealthier. "
                                "Default is 5.")
     optional.add_argument('-dl', '--delay', type=int, default=30,
@@ -88,7 +88,7 @@ def parse_arguments():
                           help="(OPTIONAL) Update the script to the latest version (Only works if installed with PIPX).")
 
     aws_group.add_argument('--aws', action='store_true', help="(OPTIONAL) Use AWS proxies. Default is False.")
-    aws_group.add_argument('-n','--num_sprays_per_ip', type=int, help="(OPTIONAL) Number of sprays to perform per IP address. Default is 5.")
+    aws_group.add_argument('-n','--num_sprays_per_ip', type=int, default=5, help="(OPTIONAL) Number of sprays to perform per IP address. Default is 5.")
     aws_group.add_argument('--proxy-clean', action='store_true', help="(OPTIONAL) Clean up all created proxies, instead of spraying.")
     aws_group.add_argument('--proxy-list', action='store_true', help="(OPTIONAL) List all created proxies.")
     aws_group.add_argument("--aws-access-key", help="AWS Access Key ID")
