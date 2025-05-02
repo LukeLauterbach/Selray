@@ -41,6 +41,8 @@ def main():
     args.lockout = utils.prepare_lockout(lockout_messages=args.lockout)
     (username_field_key, username_field_value, password_field_key, password_field_value, checkbox_key,
      checkbox_value) = utils.prepare_fields(args.username_field, args.password_field, checkbox=args.checkbox)
+    if not args.threads:  # TODO Move this somewhere cleaner. It isn't set by default, because it needs to be loaded from the modes file, if a mode is specified
+        args.threads = 5
     utils.print_beginning(args, version=__version__)
 
     ec2 = aws.get_ec2_session(args.aws_region, args.aws_access_key, args.aws_secret_key, args.aws_session_token)
