@@ -1,6 +1,6 @@
 [project]
 name = "selray"
-version = "0.4"
+version = "0.6"
 description = "Password spraying utility that uses Selenium to emulate a real user and cloud-based proxies for IP rotation."
 authors = [
   { name="Luke Lauterbach" }
@@ -21,6 +21,9 @@ dependencies = [
 
 [project.scripts]
 selray = "selray.Selray:main"
+
+[tool.setuptools.package-data]
+"selray.modes" = ["*.toml"]
 
 [tool.setuptools.packages.find]
 where = ["."]
