@@ -15,6 +15,7 @@ import os
 import toml
 from seleniumbase import Driver
 import importlib.resources
+from . import azure_proxy
 
 
 class Colors:
@@ -35,6 +36,8 @@ def parse_arguments():
     condition = parser.add_argument_group("Condition for Successful Login (One Required)")
     optional = parser.add_argument_group("Optional")
     aws_group = parser.add_argument_group("AWS Proxy Options")
+    azure_group = parser.add_argument_group("Azure Proxy Options")
+    proxy_group = parser.add_argument_group("Global Proxy Options")
 
     required.add_argument('--url',
                           help="(REQUIRED) URL of the website to spray.")
@@ -80,17 +83,21 @@ def parse_arguments():
                           help="(OPTIONAL) If a checkbox is required, provide a unique attribute of the checkbox, "
                                "allowing the script to automatically check it. For example, if "
                                "'<input type='checkbox'>', enter 'type='checkbox''")
-    optional.add_argument('--proxies', type=str,
-                          help="(OPTIONAL) Proxy URLs to proxy traffic through. Can be a file name (CSV or TXT) or a "
-                               "comma-separated list of proxies. If AWS or Azure proxies are also configured, both "
-                               "manually-specified and automatic proxies will be used.")
+
     optional.add_argument('--update', action='store_true',
                           help="(OPTIONAL) Update the script to the latest version (Only works if installed with PIPX).")
 
+    proxy_group.add_argument('--proxies', type=str,
+                          help="(OPTIONAL) Proxy URLs to proxy traffic through. Can be a file name (CSV or TXT) or a "
+                               "comma-separated list of proxies. If AWS or Azure proxies are also configured, both "
+                               "manually-specified and automatic proxies will be used.")
+    proxy_group.add_argument('--proxy-clean', action='store_true', help="(OPTIONAL) Clean up all created proxies, instead of spraying.")
+    proxy_group.add_argument('--proxy-list', action='store_true', help="(OPTIONAL) List all created proxies.")
+    proxy_group.add_argument('-n','--num_sprays_per_ip', type=int, help="(OPTIONAL) Number of sprays to perform per IP address. Default is 5.")
+
+    azure_group.add_argument('--azure', action='store_true', help="(OPTIONAL) Use Azure proxies. Default is False.")
+
     aws_group.add_argument('--aws', action='store_true', help="(OPTIONAL) Use AWS proxies. Default is False.")
-    aws_group.add_argument('-n','--num_sprays_per_ip', type=int, help="(OPTIONAL) Number of sprays to perform per IP address. Default is 5.")
-    aws_group.add_argument('--proxy-clean', action='store_true', help="(OPTIONAL) Clean up all created proxies, instead of spraying.")
-    aws_group.add_argument('--proxy-list', action='store_true', help="(OPTIONAL) List all created proxies.")
     aws_group.add_argument("--aws-access-key", help="AWS Access Key ID")
     aws_group.add_argument("--aws-secret-key", help="AWS Secret Access Key")
     aws_group.add_argument("--aws-session-token", help="AWS Session Token (optional)")
@@ -195,11 +202,11 @@ def prepare_usernames(usernames=None, domain="", domain_after=False):
 def print_ending(results):
     print(f"\nPassword spraying completed at {datetime.now().strftime('%m/%d/%Y %H:%M')}")
 
-    success_count = sum(1 for entry in results if entry.get('RESULT') == 'SUCCESS')
+    success_count = sum(1 for entry in results if entry and entry.get('RESULT') == 'SUCCESS')
     if success_count:
         print(f"Valid Credentials Found: {success_count}")
         for credential in results:
-            if credential['RESULT'] == 'SUCCESS':
+            if credential and credential.get('RESULT') == 'SUCCESS':
                 print(f"{credential['USERNAME']} - {credential['PASSWORD']}")
 
 
@@ -246,8 +253,23 @@ def prepare_proxies(ec2, args):
         for manual_proxy in manual_proxies:
             proxies.append({"type": "MANUAL", "ip": "", "id": None, "url": manual_proxy})
 
+    threads_needed = args.threads
+    threads_needed -= len(proxies)
+
+    if args.azure:
+        if threads_needed >= 6:
+            azure_threads = 3
+        elif args.aws:
+            azure_threads = int(threads_needed / 2)
+        else:
+            azure_threads = threads_needed
+        threads_needed -= azure_threads
+        proxies.extend(azure_proxy.create_proxies(azure_threads))
+
+    print(proxies)
+    print(threads_needed)
     if args.aws:
-        proxies = aws.proxy_setup(ec2, args.threads)
+         proxies.extend(aws.proxy_setup(ec2, threads_needed))
 
     if not proxies:
         proxies = [{"type": None, "ip": None, "id": None, "url": None} for _ in range(args.threads)]
@@ -258,11 +280,14 @@ def prepare_proxies(ec2, args):
 def destroy_proxies(args, ec2):
     if ec2:
         aws.terminate_instances_in_security_group(ec2, "Selray")
+    azure_proxy.delete_proxies()
 
 
 def list_proxies(args, ec2):
     if ec2:
         aws.list_instances(ec2, "Selray")
+    azure_proxy.list_proxies()
+
 
 
 def print_beginning(args, version=None):

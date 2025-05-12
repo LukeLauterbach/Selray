@@ -18,7 +18,7 @@ def main():
     args = utils.parse_arguments()
     ec2 = aws.get_ec2_session(args.aws_region, args.aws_access_key, args.aws_secret_key, args.aws_session_token)
     if args.proxy_clean:
-        utils.list_proxies(args, ec2)
+        utils.destroy_proxies(args, ec2)
         exit()
     elif args.proxy_list:
         utils.list_proxies(args, ec2)

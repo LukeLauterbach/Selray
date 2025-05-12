@@ -9,7 +9,7 @@ import logging
 from rich.table import Table
 from rich.console import Console
 from rich.text import Text
-from alive_progress import alive_bar
+from tqdm import tqdm
 
 
 def main(num_proxies=5, clean=False, debug=False):
@@ -150,28 +150,28 @@ def proxy_setup(ec2_session, num_proxies=5):
     ssh_key_name = "Selray"
     tasks = ['Creating SSH Keys', 'Creating Security Group', 'Finding AWS OS Image',
              f'Creating {num_proxies} EC2 Instances', 'Setting Up TinyProxy']
-    with alive_bar(len(tasks), title='Starting...', force_tty=True, transient=True) as bar:
-        bar.title(tasks[0])
+    with tqdm(total=len(tasks), desc='Starting...', dynamic_ncols=True) as bar:
+        bar.set_description(tasks[0])
         if not os.path.exists(f"{ssh_key_name}.pem"):
             create_ssh_key(ec2_session, ssh_key_name)
-        bar()
+        bar.update(1)
 
-        bar.title(tasks[1])
+        bar.set_description(tasks[1])
         my_ip = create_security_group(ec2_session, "Selray")
-        bar()
+        bar.update(1)
 
-        bar.title(tasks[2])
+        bar.set_description(tasks[2])
         ec2_ami = find_os_ami(ec2_session)
-        bar()
+        bar.update(1)
 
-        bar.title(tasks[3])
+        bar.set_description(tasks[3])
         ec2_instances = create_ec2_instances(ec2_session, ssh_key_name, ec2_ami, num_proxies)
-        bar()
+        bar.update(1)
 
-        bar.title(tasks[4])
+        bar.set_description(tasks[4])
         for ec2_instance in ec2_instances:
             setup_tinyproxy(ec2_instance['ip'], ssh_key_name, my_ip)
-        bar()
+        bar.update(1)
 
     return ec2_instances
 
@@ -257,7 +257,7 @@ def create_ec2_instances(ec2_session, ssh_key_name, ami_id, num_proxies=5):
         # Reload to get the public IP address
         instance.reload()
 
-        ec2_instances.append({'type': 'AWS', 'id': instance.id, 'ip': instance.public_ip_address, 'url': f"http://{ip}:8888"})
+        ec2_instances.append({'type': 'AWS', 'id': instance.id, 'ip': instance.public_ip_address, 'url': f"http://{instance.public_ip_address}:8888"})
 
     time.sleep(30)  # Wait a few seconds for the instance to fully initialize
 
