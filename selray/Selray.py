@@ -25,6 +25,7 @@ def main():
         exit()
     elif args.update:
         update.self_update()
+        exit()
 
     # Prepare variables
     if args.mode:

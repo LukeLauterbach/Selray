@@ -10,6 +10,7 @@ dependencies = [
     "boto3",
     "requests",
     "rich",
+    "tqdm",
     "selenium",
     "seleniumbase",
     "paramiko",
