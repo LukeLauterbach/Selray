@@ -151,7 +151,7 @@ def list_in_string(string_to_check="", list_to_compare=None):
     if not list_to_compare:
         return False
     for comparison_string in list_to_compare:
-        if comparison_string in string_to_check:
+        if comparison_string.lower() in string_to_check.lower():
             return True
     return False
 
