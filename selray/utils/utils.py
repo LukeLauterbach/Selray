@@ -266,8 +266,6 @@ def prepare_proxies(ec2, args):
         threads_needed -= azure_threads
         proxies.extend(azure_proxy.create_proxies(azure_threads))
 
-    print(proxies)
-    print(threads_needed)
     if args.aws:
          proxies.extend(aws.proxy_setup(ec2, threads_needed))
 
@@ -280,7 +278,8 @@ def prepare_proxies(ec2, args):
 def destroy_proxies(args, ec2):
     if ec2:
         aws.terminate_instances_in_security_group(ec2, "Selray")
-    azure_proxy.delete_proxies()
+    if args.azure:
+        azure_proxy.delete_proxies()
 
 
 def list_proxies(args, ec2):
