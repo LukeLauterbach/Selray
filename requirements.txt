@@ -3,6 +3,7 @@ boto3
 rich
 selenium
 seleniumbase
+tqdm
 paramiko
 pause
 toml
