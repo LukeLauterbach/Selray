@@ -346,12 +346,20 @@ def install_azure_cli():
             "Start-Process msiexec.exe -Wait -ArgumentList '/I AzureCLI.msi /quiet'; "
             "Remove-Item AzureCLI.msi"
         ], check=True)
+
     elif system == "Linux":
+        # Manual .deb install fallback for Kali/Debian variants
+        azure_deb = "azure-cli_latest-1_all.deb"
         subprocess.run([
-            "bash", "-c", "curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash"
+            "curl", "-L", "https://packages.microsoft.com/repos/azure-cli/pool/main/a/azure-cli/azure-cli_2.59.0-1_all.deb", "-o", azure_deb
         ], check=True)
+        subprocess.run(["sudo", "dpkg", "-i", azure_deb], check=True)
+        subprocess.run(["sudo", "apt-get", "-f", "install", "-y"], check=True)  # fix dependencies
+        os.remove(azure_deb)
+
     else:
         raise RuntimeError(f"Unsupported OS: {system}")
+
 
 def az_login_service_principal(app_id, password, tenant_id):
     print("🔐 Logging in using service principal...")
