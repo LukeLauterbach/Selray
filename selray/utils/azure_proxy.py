@@ -5,6 +5,7 @@ import argparse
 import base64
 import requests
 import platform
+import shutil
 from azure.core.exceptions import ResourceNotFoundError
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.subscription import SubscriptionClient
