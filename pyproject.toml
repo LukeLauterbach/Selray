@@ -7,6 +7,12 @@ authors = [
 ]
 dependencies = [
     "alive_progress",
+    "azure-core",
+    "azure-identity",
+    "azure-mgmt-subscription",
+    "azure-mgmt-resource",
+    "azure-mgmt-compute",
+    "azure-mgmt-network",
     "boto3",
     "requests",
     "rich",
