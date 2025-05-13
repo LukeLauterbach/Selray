@@ -348,14 +348,12 @@ def install_azure_cli():
         ], check=True)
 
     elif system == "Linux":
-        # Manual .deb install fallback for Kali/Debian variants
-        azure_deb = "azure-cli_latest-1_all.deb"
         subprocess.run([
-            "curl", "-L", "https://packages.microsoft.com/repos/azure-cli/pool/main/a/azure-cli/azure-cli_2.59.0-1_all.deb", "-o", azure_deb
+            "sudo", "apt-get", "update"
         ], check=True)
-        subprocess.run(["sudo", "dpkg", "-i", azure_deb], check=True)
-        subprocess.run(["sudo", "apt-get", "-f", "install", "-y"], check=True)  # fix dependencies
-        os.remove(azure_deb)
+        subprocess.run([
+            "sudo", "apt-get", "install", "-y", "azure-cli"
+        ], check=True)
 
     else:
         raise RuntimeError(f"Unsupported OS: {system}")
