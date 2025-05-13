@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from multiprocessing import Process, Queue
 from selray.utils import SprayConfig, aws, utils, update
+from selray.utils import azure_proxy
 import pause
 
 # --------------------------------- #
@@ -17,6 +18,10 @@ __version__ = "0.6"
 def main():
     args = utils.parse_arguments()
     ec2 = aws.get_ec2_session(args.aws_region, args.aws_access_key, args.aws_secret_key, args.aws_session_token)
+
+    if args.azure:
+        azure_proxy.ensure_azure_cli_and_login()
+
     if args.proxy_clean:
         utils.destroy_proxies(args, ec2)
         exit()

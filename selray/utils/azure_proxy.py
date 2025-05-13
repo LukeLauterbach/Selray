@@ -380,7 +380,7 @@ def ensure_logged_in():
         return False
 
 
-def ensure_azure_cli_and_login(app_id, password, tenant_id):
+def ensure_azure_cli_and_login(app_id="", password="", tenant_id=""):
     install_azure_cli()
     if not ensure_logged_in():
         interactive_azure_login()
