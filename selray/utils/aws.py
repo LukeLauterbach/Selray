@@ -10,6 +10,7 @@ from rich.table import Table
 from rich.console import Console
 from rich.text import Text
 from tqdm import tqdm
+import socket
 
 
 def main(num_proxies=5, clean=False, debug=False):
@@ -75,12 +76,9 @@ def refresh_instance_ip(ec2_session, instance_id):
 
     logging.debug(f"Starting instance {instance_id}...")
     ec2.start_instances(InstanceIds=[instance_id])
-    waiter = ec2.get_waiter('instance_running')
+    waiter = ec2.get_waiter('instance_status_ok')
     waiter.wait(InstanceIds=[instance_id])
     logging.debug("Instance started and running.")
-
-    # Wait for the instance to initialize.
-    time.sleep(30)
 
     response = ec2.describe_instances(InstanceIds=[instance_id])
     new_ip = response['Reservations'][0]['Instances'][0].get('PublicIpAddress')
@@ -89,7 +87,10 @@ def refresh_instance_ip(ec2_session, instance_id):
         raise Exception("Public IP not assigned after restart.")
 
     logging.debug(f"New public IP for {instance_id}: {new_ip}")
-    return new_ip
+
+    wait_for_instance_to_be_ready(new_ip)
+
+    return new_ip, f"http://{new_ip}:8888"
 
 
 def list_instances(ec2_session, security_group_name, region="us-east-2"):
@@ -176,7 +177,11 @@ def proxy_setup(ec2_session, num_proxies=5):
     return ec2_instances
 
 
+
 def setup_tinyproxy(ec2_ip, key_name, my_ip):
+
+    wait_for_instance_to_be_ready(ec2_ip, port=22)
+
     ssh_client = paramiko.SSHClient()
     ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     key = paramiko.RSAKey.from_private_key_file(f"{key_name}.pem")
@@ -259,9 +264,42 @@ def create_ec2_instances(ec2_session, ssh_key_name, ami_id, num_proxies=5):
 
         ec2_instances.append({'type': 'AWS', 'id': instance.id, 'ip': instance.public_ip_address, 'url': f"http://{instance.public_ip_address}:8888"})
 
-    time.sleep(30)  # Wait a few seconds for the instance to fully initialize
-
     return ec2_instances
+
+
+def wait_for_instance_to_be_ready(ec2_instance, timeout=120, check_interval=5, port=8888):
+    """
+    Repeatedly checks if port 8888 is open on the instance until timeout.
+
+    :param ec2_instance: Dictionary with at least 'ip' key.
+    :param timeout: Total time (in seconds) to keep checking.
+    :param check_interval: Time between checks (in seconds).
+    :return: True if port is open before timeout, else False.
+    """
+    if isinstance(ec2_instance, dict):
+        ip = ec2_instance['ip']
+    else:
+        ip = ec2_instance
+    start_time = time.time()
+
+    while (time.time() - start_time) < timeout:
+        if is_port_open(ip, port):
+            logging.debug(f"✅ Port {port} is open on {ip}")
+            return True
+        else:
+            logging.debug(f"⏳ Waiting for port {port} on {ip} to open...")
+            time.sleep(check_interval)
+
+    logging.error(f"❌ Timeout: Port {port} not open on {ip} after {timeout} seconds")
+    return False
+
+
+def is_port_open(ip, port, timeout=3):
+    try:
+        with socket.create_connection((ip, port), timeout=timeout):
+            return True
+    except (socket.timeout, OSError):
+        return False
 
 
 def create_ssh_key(ec2_session, key_name, region_name="us-east-2"):
@@ -401,6 +439,10 @@ def stop_ec2_instance(ec2_session, instance_id):
         return None
 
 
+import boto3
+import logging
+
+
 def start_ec2_instance(ec2_session, instance_id):
     """
     Starts an EC2 instance by instance ID and returns the new public IP address.
@@ -417,7 +459,8 @@ def start_ec2_instance(ec2_session, instance_id):
         state = status_response['InstanceStatuses'][0]['InstanceState']['Name']
         if state == "running":
             logging.debug(f"Instance {instance_id} is already running.")
-            return get_instance_ip(ec2, instance_id)
+            ip = get_instance_ip(ec2_session, instance_id)
+            return ip, f"http://{ip}:8888"
 
         ec2.start_instances(InstanceIds=[instance_id])
         logging.debug(f"Starting instance: {instance_id}")
@@ -426,14 +469,18 @@ def start_ec2_instance(ec2_session, instance_id):
         waiter.wait(InstanceIds=[instance_id])
         logging.debug(f"Instance {instance_id} is now running.")
 
-        # Give it a few seconds to assign a public IP
-        time.sleep(10)
+        # Retrieve and return the public IP address
+        ip = get_instance_ip(ec2_session, instance_id)
+        logging.debug(f"Instance {instance_id} public IP: {ip}")
 
-        return get_instance_ip(ec2, instance_id)
+        # Wait for the proxy to come up (and be available on port 8888)
+        wait_for_instance_to_be_ready(ip)
+
+        return ip, f"http://{ip}:8888"
 
     except Exception as e:
-        logging.debug(f"Error starting instance {instance_id}: {e}")
-        return None
+        logging.error(f"❌ Error starting instance {instance_id}: {e}")
+        return None, None
 
 
 def get_instance_ip(ec2_session, instance_id):
