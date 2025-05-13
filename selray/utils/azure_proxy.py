@@ -1,5 +1,6 @@
 import sys
 import os
+import subprocess
 import argparse
 import base64
 import requests
@@ -324,6 +325,69 @@ def list_proxies():
         console.print("⚠️ No proxies found.")
     else:
         console.print(table)
+
+
+def install_azure_cli():
+    system = platform.system()
+
+    if shutil.which("az"):
+        print("✅ Azure CLI already installed.")
+        return
+
+    print(f"🔧 Installing Azure CLI on {system}...")
+
+    if system == "Windows":
+        subprocess.run([
+            "powershell",
+            "-Command",
+            "Invoke-WebRequest -Uri https://aka.ms/installazurecliwindows -OutFile AzureCLI.msi; "
+            "Start-Process msiexec.exe -Wait -ArgumentList '/I AzureCLI.msi /quiet'; "
+            "Remove-Item AzureCLI.msi"
+        ], check=True)
+    elif system == "Linux":
+        subprocess.run([
+            "bash", "-c", "curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash"
+        ], check=True)
+    else:
+        raise RuntimeError(f"Unsupported OS: {system}")
+
+def az_login_service_principal(app_id, password, tenant_id):
+    print("🔐 Logging in using service principal...")
+    subprocess.run([
+        "az", "login",
+        "--service-principal",
+        "--username", app_id,
+        "--password", password,
+        "--tenant", tenant_id
+    ], check=True)
+
+
+def interactive_azure_login():
+    try:
+        print("🔐 Launching interactive Azure login...")
+        subprocess.run(["az", "login"], check=True)
+        print("✅ Login successful.")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Azure login failed: {e}")
+
+
+def ensure_logged_in():
+    try:
+        subprocess.run(["az", "account", "show"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        print("✅ Already logged in to Azure CLI.")
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
+def ensure_azure_cli_and_login(app_id, password, tenant_id):
+    install_azure_cli()
+    if not ensure_logged_in():
+        interactive_azure_login()
+        if ensure_logged_in():
+            print("✅ Login successful.")
+        else:
+            raise RuntimeError("❌ Login failed.")
 
 
 def main():
