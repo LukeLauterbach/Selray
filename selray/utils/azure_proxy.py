@@ -26,7 +26,7 @@ def authenticate_azure():
         subscription = next(subscription_client.subscriptions.list())
         subscription_id = subscription.subscription_id
 
-        print(f"✅ Authenticated to Azure. Subscription ID: {subscription_id}")
+        #print(f"✅ Authenticated to Azure. Subscription ID: {subscription_id}")
         return credential, subscription_id
 
     except Exception as e:
@@ -197,7 +197,7 @@ def delete_proxies():
 
 
 def create_proxies(count):
-    with tqdm(total=(3+(count*4)), desc="Creating Azure Proxies", dynamic_ncols=True) as bar:
+    with tqdm(total=(3+(count*3)), desc="Creating Azure Proxies", dynamic_ncols=True) as bar:
         bar.set_description("Authenticating to Azure")
         credential, subscription_id = authenticate_azure()
         resource_client = ResourceManagementClient(credential, subscription_id)
@@ -235,6 +235,8 @@ def create_proxies(count):
                 "vm_index": i
             })
             #print(f"✅ Proxy {i + 1} URL: {proxy_url}")
+
+        bar.update(1)
 
 
     return proxies

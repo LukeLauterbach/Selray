@@ -396,7 +396,6 @@ def attempt_login(spray_config, proxy_url):
     except TimeoutException:
         input_box.send_keys(Keys.RETURN)
         sleep(1)  # Wait for the page to load
-
         # Specific to the Microsoft Online login portal
         if "Microsoft" and "Work or school account" in driver.page_source:
             work_box = driver.find_element(By.XPATH, f"//div[@id='aadTile']")
