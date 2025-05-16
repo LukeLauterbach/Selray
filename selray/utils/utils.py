@@ -9,7 +9,7 @@ from selenium.webdriver import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from multiprocessing import Process
 import os
 import toml
@@ -371,7 +371,16 @@ def attempt_login(spray_config, proxy_url):
 
     driver.set_page_load_timeout(30)
     driver.delete_all_cookies()
-    driver.get(spray_config.url)
+    for i in range(3):
+        try:
+            driver.get(spray_config.url)
+            break
+        except WebDriverException:
+            if i == 2:
+                print(
+                    f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - ERROR - Could not load the URL: {spray_config.url}")
+                driver.close()
+                return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "ERROR"}
 
     # Wait until the username box loads
     try:
