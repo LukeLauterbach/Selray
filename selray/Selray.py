@@ -35,7 +35,7 @@ def main():
     if args.passwords:
         args.passwords = utils.process_file(args.passwords)
     else:
-        args.passwords = []
+        args.passwords = [""]
     args.usernames = utils.prepare_usernames(args.usernames, args.domain, args.domain_after)
     args.url = utils.prepare_url(args.url)
     args.invalid_username = utils.prepare_invalid_username(invalid_username=args.invalid_username)

