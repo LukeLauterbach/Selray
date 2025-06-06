@@ -40,8 +40,6 @@ def main():
     args.url = utils.prepare_url(args.url)
     args.invalid_username = utils.prepare_invalid_username(invalid_username=args.invalid_username)
     args.lockout = utils.prepare_lockout(lockout_messages=args.lockout)
-    if getattr(args, "pre_login_code", None):
-        args.pre_login_code = ""
     (username_field_key, username_field_value, password_field_key, password_field_value, checkbox_key,
      checkbox_value) = utils.prepare_fields(args.username_field, args.password_field, checkbox=args.checkbox)
     if not args.threads:  # TODO Move this somewhere cleaner. It isn't set by default, because it needs to be loaded from the modes file, if a mode is specified
@@ -72,7 +70,7 @@ def main():
         lockout=args.lockout,
         threads=args.threads,
         pre_login_code=args.pre_login_code,
-        passwordless=args.passwordless
+        passwordless=getattr(args, "pre_login_code", "")
     )
 
     results = []
