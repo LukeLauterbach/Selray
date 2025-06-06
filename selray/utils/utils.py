@@ -395,8 +395,6 @@ def attempt_login(spray_config, proxy_url):
 
     # Execute Before Code
     if spray_config.pre_login_code:
-        print(type(spray_config.pre_login_code))
-        print(spray_config.pre_login_code)
         exec(spray_config.pre_login_code)
 
     # Wait until the username box loads
