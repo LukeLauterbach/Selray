@@ -168,7 +168,7 @@ def prepare_invalid_username(invalid_username=None):
 
 
 def prepare_lockout(lockout_messages=None):
-    final_list = ["account has been locked out", "too many login attempts"]
+    final_list = ["account has been locked out", "too many login attempts", "your account is temporarily locked"]
     if lockout_messages:
         invalid_username = lockout_messages.split(",")
         final_list.extend(invalid_username)
