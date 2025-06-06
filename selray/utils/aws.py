@@ -214,6 +214,10 @@ def find_os_ami(ec2_session):
         Filters=[{
             'Name': 'name',
             'Values': ['*alpine*']
+        },
+        {
+            'Name': 'architecture',
+            'Values': ['x86_64']
         }]
     )
 
