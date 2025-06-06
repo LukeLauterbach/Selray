@@ -1,0 +1,11 @@
+username_field = 'type="email"'
+password_field = 'type="password"'
+fail = "Incorrect user ID or password"
+pre_login_code = """
+try:
+    WebDriverWait(driver, 5).until(ec.element_to_be_clickable((By.ID, "idp_SignInButton")))
+    sign_in_button = driver.find_element(By.ID, "idp_SignInButton")
+    sign_in_button.click()
+except Exception:
+    pass
+"""

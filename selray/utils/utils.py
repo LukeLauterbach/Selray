@@ -79,7 +79,7 @@ def parse_arguments():
     optional.add_argument('-l', '--lockout', type=str,
                          help="(OPTIONAL) String(s) to look for to determine if the account has been locked. Multiple "
                               "strings can be provided comma seperated with no spaces.")
-    optional.add_argument('-pl', '--passwordless', type=str, default="Other ways to sign in",
+    optional.add_argument('-pl', '--passwordless', type=str,
                           help="(OPTIONAL) String(s) to look for to determine if the account has been locked. Multiple "
                               "strings can be provided comma seperated with no spaces.")
     optional.add_argument('-cb', '--checkbox', type=str,
@@ -164,6 +164,14 @@ def prepare_invalid_username(invalid_username=None):
     if invalid_username:
         invalid_username = invalid_username.split(",")
         final_list.extend(invalid_username)
+    return final_list
+
+
+def prepare_passwordless(passwordless_auth=None):
+    final_list = ["Get a code to sign in", "Complete sign-in using your passkey"]
+    if passwordless_auth:
+        the_list = passwordless_auth.split(",")
+        final_list.extend(the_list)
     return final_list
 
 
@@ -385,6 +393,12 @@ def attempt_login(spray_config, proxy_url):
                 driver.close()
                 return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "ERROR"}
 
+    # Execute Before Code
+    if spray_config.pre_login_code:
+        print(type(spray_config.pre_login_code))
+        print(spray_config.pre_login_code)
+        exec(spray_config.pre_login_code)
+
     # Wait until the username box loads
     try:
         WebDriverWait(driver, 5).until(
@@ -423,7 +437,7 @@ def attempt_login(spray_config, proxy_url):
         driver.close()
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.WARNING}ACCOUNT LOCKOUT{Colors.END}: {spray_config.username}")
         return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "LOCKED"}
-    elif list_in_string(string_to_check=driver.page_source.lower(), list_to_compare=spray_config.passwordless_auth):
+    elif list_in_string(string_to_check=driver.page_source.lower(), list_to_compare=spray_config.passwordless):
         driver.close()
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - PASSWORDLESS: {spray_config.username}")
         return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "PASSWORDLESS"}
