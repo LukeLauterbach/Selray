@@ -2,7 +2,7 @@ class SprayConfig:
     def __init__(self, url, username_field_key, username_field_value,
                  password_field_key, password_field_value, checkbox_key, checkbox_value,
                  fail, success, invalid_username, num_sprays_per_ip, aws_access_key, aws_secret_key,
-                 aws_session_token, aws_region, lockout, threads):
+                 aws_session_token, aws_region, lockout, threads, pre_login_code, passwordless):
         self.username = None
         self.password = None
         self.url = url
@@ -22,3 +22,5 @@ class SprayConfig:
         self.aws_session_token = aws_session_token
         self.lockout = lockout
         self.threads = threads
+        self.pre_login_code = pre_login_code
+        self.passwordless = passwordless
