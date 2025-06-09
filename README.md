@@ -64,6 +64,7 @@ You must also specify either:
 - **`-dl {INTEGER}`** – Delay (in minutes) between password sprays (default: 30)
 - **`-i`** – Text that will be displayed on the page if the username is invalid (comma separated, if multiple)
 - **`-l`** - Text that will be displayed on the page if the account is locked out (comma separated, if multiple)
+- **`-nh`** - No Headless. By default, Selray will use a headless browser. However, some web applications don't like headless browsers and a headful browser can be helpful for troubleshooting. This option will turn headless mode off. Note, the pop up windows will be very invasive.
 - **`-cb`** – Checkbox attribute selector, if you want to have a checkbox on the login page checked. Works the same as `-uf` and `-pf`.
 - **`-d {DOMAIN}`** – Prefix a domain to the usernames(e.g., `DOMAIN\USERNAME`)
 - **`-da {DOMAIN}`** – Postfix a domain to the username(e.g., `USERNAME@DOMAIN`)

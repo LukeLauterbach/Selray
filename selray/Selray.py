@@ -67,7 +67,9 @@ def main():
         lockout=args.lockout,
         threads=args.threads,
         pre_login_code=getattr(args, "pre_login_code", ""),
-        passwordless=getattr(args, "passwordless", "")
+        passwordless=getattr(args, "passwordless", ""),
+        # This next one is confusing. We're flipping from "no headless" to "headless".
+        headless=not getattr(args, "no_headless", True),
     )
 
     results = []
