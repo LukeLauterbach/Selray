@@ -82,6 +82,7 @@ def parse_arguments():
     optional.add_argument('-pl', '--passwordless', type=str,
                           help="(OPTIONAL) String(s) to look for to determine if the account has been locked. Multiple "
                               "strings can be provided comma seperated with no spaces.")
+    optional.add_argument('-nh', '--no-headless', action='store_true', default=False)
     optional.add_argument('-cb', '--checkbox', type=str,
                           help="(OPTIONAL) If a checkbox is required, provide a unique attribute of the checkbox, "
                                "allowing the script to automatically check it. For example, if "
@@ -370,12 +371,13 @@ def attempt_login(spray_config, proxy_url):
             selenium_options.append(f'--proxy-server={proxy_url}')
         # Initialize the Selenium browser
         driver = Driver(uc=True,
-                        headless=False,
+                        headless=spray_config.headless,
                         chromium_arg=selenium_options)
     else:
         selenium_options = webdriver.ChromeOptions()
         selenium_options.add_argument('--ignore-certificate-errors')
-        # selenium_options.add_argument("--headless")
+        if spray_config.headless:
+            selenium_options.add_argument("--headless")
         if proxy_url:
             selenium_options.add_argument(f'--proxy-server={proxy_url}')
         driver = webdriver.Chrome(options=selenium_options)
