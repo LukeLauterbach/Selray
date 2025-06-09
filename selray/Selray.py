@@ -32,10 +32,7 @@ def main():
         utils.load_mode_config(args)
     args.fail, args.success = utils.prepare_success_fail(fail=args.fail, success=args.success)
     args.usernames = utils.process_file(args.usernames)
-    if args.passwords:
-        args.passwords = utils.process_file(args.passwords)
-    else:
-        args.passwords = [""]
+    args.passwords = utils.process_file(args.passwords) if args.passwords else [""]
     args.usernames = utils.prepare_usernames(args.usernames, args.domain, args.domain_after)
     args.url = utils.prepare_url(args.url)
     args.invalid_username = utils.prepare_invalid_username(invalid_username=args.invalid_username)
@@ -77,7 +74,7 @@ def main():
 
     try:
         # Perform credential stuffing, if that's what's in store:
-        if not args.passwords and ":" in args.usernames[1]:
+        if (not args.passwords or args.passwords == ['']) and ":" in args.usernames[1]:
             utils.credential_stuffing(spray_config, args, proxies)
         else:
 

@@ -10,7 +10,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException, WebDriverException
-from multiprocessing import Process
+from multiprocessing import Process, Queue
 import os
 import toml
 from seleniumbase import Driver
@@ -527,13 +527,18 @@ def credential_stuffing(spray_config, args, proxies):
                        range(0, len(credentials_to_spray), chunk_size)]
 
         processes = []
+        results = []
+        queue = Queue()
         for proxy, user_chunk in zip(proxies, user_chunks):
-            p = Process(target=perform_spray, args=(spray_config, user_chunk, proxy))
+            p = Process(target=perform_spray, args=(spray_config, user_chunk, proxy, queue))
             p.start()
             processes.append(p)
 
         for p in processes:
             p.join()
+
+        while not queue.empty():
+            results.extend(queue.get())
 
         # Check to see if the process is at the end. If not, wait the specified time.
         if stuffing_attempt < num_stuffing_attempts:
