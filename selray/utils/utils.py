@@ -15,7 +15,7 @@ import os
 import toml
 from seleniumbase import Driver
 import importlib.resources
-from . import azure_proxy
+from . import azure_proxy, update
 
 
 class Colors:
@@ -110,6 +110,18 @@ def parse_arguments():
     return parser.parse_args()
 
 
+def alternate_modes(args, ec2):
+    if args.proxy_clean:
+        destroy_proxies(args, ec2)
+        exit()
+    elif args.proxy_list:
+        list_proxies(args, ec2)
+        exit()
+    elif args.update:
+        update.self_update()
+        exit()
+
+
 def load_mode_config(args, mode_dir='selray/modes'):
     """
     Loads mode configuration from a TOML file into the args namespace if not already specified.
@@ -127,31 +139,8 @@ def load_mode_config(args, mode_dir='selray/modes'):
             setattr(args, key, value)
 
 
-def prepare_fields(username_field="", password_field="", checkbox=""):
-    username_field = username_field.replace("'", "").replace('"', "")  # Remove quotation marks
-    password_field = password_field.replace("'", "").replace('"', "")  # Remove quotation marks
-
-    username_field = username_field.split("=")
-    username_field_key = username_field[0]
-    username_field_value = username_field[1]
-
-    password_field = password_field.split("=")
-    password_field_key = password_field[0]
-    password_field_value = password_field[1]
-
-    if checkbox:
-        checkbox = checkbox.replace("'", "").replace('"', "")  # Remove quotation marks
-        checkbox = checkbox.split("=")
-        checkbox_key = checkbox[0]
-        checkbox_value = checkbox[1]
-    else:
-        checkbox_key, checkbox_value = "", ""
-
-    return (username_field_key, username_field_value, password_field_key, password_field_value, checkbox_key,
-            checkbox_value)
-
-
 def list_in_string(string_to_check="", list_to_compare=None):
+    # Return True if any string from ``list_to_compare`` exists in ``string_to_check``.
     if not list_to_compare:
         return False
     for comparison_string in list_to_compare:
@@ -351,7 +340,13 @@ def perform_spray(spray_config, credentials, proxy, queue):
         if spray_num_with_current_ip >= spray_config.num_sprays_per_ip and proxy['type'] == 'AWS':
             proxy['ip'], proxy['url'] = aws.refresh_instance_ip(ec2, proxy['id'])
             spray_num_with_current_ip = 0
+
+        # `attempt_login` returns a dictionary with:
+        #   - USERNAME
+        #   - PASSWORD
+        #   - RESULT: one of ["INVALID USERNAME", "LOCKED", "PASSWORDLESS", "VALID USERNAME", "ERROR", "SUCCESS", "FAILURE"]
         result = attempt_login(spray_config, proxy['url'])
+
         results.append(result)
         spray_num_with_current_ip += 1
 
@@ -498,6 +493,7 @@ def attempt_login(spray_config, proxy_url):
 
 def credential_stuffing(spray_config, args, proxies):
     credentials = []
+    results = []
     for credential in args.usernames:
         username = credential.split(":")[0]
         password = credential.split(":")[1]
@@ -529,7 +525,6 @@ def credential_stuffing(spray_config, args, proxies):
                        range(0, len(credentials_to_spray), chunk_size)]
 
         processes = []
-        results = []
         queue = Queue()
         for proxy, user_chunk in zip(proxies, user_chunks):
             p = Process(target=perform_spray, args=(spray_config, user_chunk, proxy, queue))
@@ -546,8 +541,17 @@ def credential_stuffing(spray_config, args, proxies):
         if stuffing_attempt < num_stuffing_attempts:
             print(f"Stuffing attempt {stuffing_attempt} of {num_stuffing_attempts} complete. Waiting until "
                   f"{next_start_time.strftime('%H:%M')} to start next stuffing attempt.")
+            if any(entry['RESULT'] == 'SUCCESS' for entry in results):
+                print("Valid Credentials Found:")
+                for entry in results:
+                    if entry['RESULT'] == 'SUCCESS':
+                        print(f"{entry['USERNAME']} - {entry['PASSWORD']}")
+                print()
             pause.until(next_start_time)
+
         else:
             print(
                 f"Spray of password {stuffing_attempt} of {num_stuffing_attempts} complete. All passwords complete.")
         stuffing_attempt += 1
+
+    return results
