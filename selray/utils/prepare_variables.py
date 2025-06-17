@@ -8,7 +8,7 @@ def main(args):
     args.fail, args.success = utils.prepare_success_fail(fail=args.fail, success=args.success)
     args.usernames = utils.process_file(args.usernames)
     args.passwords = utils.process_file(args.passwords) if args.passwords else [""]
-    args.usernames = utils.prepare_usernames(args.usernames, args.domain, args.domain_after)
+    args.usernames = utils.prepare_usernames(args.usernames, args.domain, args.domain_after, args.domain_backslash)
     args.url = utils.prepare_url(args.url)
     args.invalid_username = utils.prepare_invalid_username(invalid_username=args.invalid_username)
     args.lockout = utils.prepare_lockout(lockout_messages=args.lockout)
