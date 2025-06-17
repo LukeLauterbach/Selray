@@ -70,6 +70,8 @@ def parse_arguments():
                           help="(OPTIONAL) Length of time between passwords. The delay is between the first spray "
                                "attempt with a password and the first attempt with the next password. Default is 30.")
     optional.add_argument("-d", "--domain",
+                          help="(OPTIONAL) Prefix all usernames with a domain (e.g. DOMAIN/USERNAME)")
+    optional.add_argument("-db", "--domain-backslash",
                           help="(OPTIONAL) Prefix all usernames with a domain (e.g. DOMAIN\\USERNAME)")
     optional.add_argument("-da", "--domain-after", action="store_true",
                           help="(OPTIONAL) Append domain to the end of the username (e.g. username@domain)")
@@ -180,7 +182,7 @@ def prepare_url(url=""):
     return url
 
 
-def prepare_usernames(usernames=None, domain="", domain_after=False):
+def prepare_usernames(usernames=None, domain="", domain_after=False, db=False):
     if not domain:
         return usernames
 
@@ -193,7 +195,10 @@ def prepare_usernames(usernames=None, domain="", domain_after=False):
         if domain_after:
             usernames[i] = f"{usernames[i]}@{domain}"
         else:
-            usernames[i] = f"{domain}/{usernames[i]}"
+            if db:
+                usernames[i] = f"{domain}\{usernames[i]}"
+            else:
+                usernames[i] = f"{domain}/{usernames[i]}"
 
         i += 1
 
