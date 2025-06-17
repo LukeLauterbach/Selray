@@ -70,10 +70,10 @@ def parse_arguments():
                           help="(OPTIONAL) Length of time between passwords. The delay is between the first spray "
                                "attempt with a password and the first attempt with the next password. Default is 30.")
     optional.add_argument("-d", "--domain",
-                          help="(OPTIONAL) Prefix all usernames with a domain (e.g. DOMAIN/USERNAME)")
+                          help="(OPTIONAL) Prefix all usernames with a domain, with a forward slash (e.g. DOMAIN/USERNAME)")
     optional.add_argument("-db", "--domain-backslash",
-                          help="(MUST BE USED WITH -d) Manually specify the prefix for DOMAIN/USERNAME to use a backslash instead of the default forwardslash (e.g. DOMAIN\\USERNAME)")
-    optional.add_argument("-da", "--domain-after", action="store_true",
+                          help="(OPTIONAL) Prefix all usernames with a domain, with a backslash (e.g. DOMAIN\\USERNAME)")
+    optional.add_argument("-da", "--domain-after",
                           help="(OPTIONAL) Append domain to the end of the username (e.g. username@domain)")
     optional.add_argument("-i", "--invalid-username", type=str,
                           help="(OPTIONAL) String(s) to look for to determine if the username was invalid. Multiple "
@@ -182,8 +182,8 @@ def prepare_url(url=""):
     return url
 
 
-def prepare_usernames(usernames=None, domain="", domain_after=False, db=False):
-    if not domain:
+def prepare_usernames(usernames=None, domain="", domain_after=False, domain_before=False):
+    if not domain and not domain_after and not domain_before:
         return usernames
 
     i = 0
@@ -193,12 +193,11 @@ def prepare_usernames(usernames=None, domain="", domain_after=False, db=False):
             continue
 
         if domain_after:
-            usernames[i] = f"{usernames[i]}@{domain}"
+            usernames[i] = f"{usernames[i]}@{domain_after}"
+        elif domain_before:
+            usernames[i] = f"{domain_before}\\{usernames[i]}"
         else:
-            if db:
-                usernames[i] = f"{domain}\{usernames[i]}"
-            else:
-                usernames[i] = f"{domain}/{usernames[i]}"
+            usernames[i] = f"{domain}/{usernames[i]}"
 
         i += 1
 
