@@ -72,7 +72,7 @@ def parse_arguments():
     optional.add_argument("-d", "--domain",
                           help="(OPTIONAL) Prefix all usernames with a domain (e.g. DOMAIN/USERNAME)")
     optional.add_argument("-db", "--domain-backslash",
-                          help="(OPTIONAL) Prefix all usernames with a domain (e.g. DOMAIN\\USERNAME)")
+                          help="(MUST BE USED WITH -d) Manually specify the prefix for DOMAIN/USERNAME to use a backslash instead of the default forwardslash (e.g. DOMAIN\\USERNAME)")
     optional.add_argument("-da", "--domain-after", action="store_true",
                           help="(OPTIONAL) Append domain to the end of the username (e.g. username@domain)")
     optional.add_argument("-i", "--invalid-username", type=str,
