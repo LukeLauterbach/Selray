@@ -29,7 +29,7 @@ def main():
 
     try:
         # Perform credential stuffing, if that's what's in store:
-        if (not args.passwords or args.passwords == ['']) and ":" in args.usernames[1]:
+        if (not args.passwords or args.passwords == ['']) and ":" in args.usernames[0]:
             results = utils.credential_stuffing(spray_config, args, proxies)
         else:
             results = spray.main(args, proxies, spray_config)
