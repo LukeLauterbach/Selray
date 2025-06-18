@@ -125,4 +125,4 @@ python selray/Selray.py
 ## ⚠️ Disclaimer
 This tool is intended for authorized testing and educational purposes only.  
 Unauthorized use against systems without permission is illegal and unethical.  
-The author assumes no responsibility for misuse.
+The author and all contributors assume no responsibility for misuse.
