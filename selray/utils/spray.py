@@ -17,7 +17,10 @@ def main(args, proxies, spray_config):
         processes = launch_spray_processes(spray_config, proxies, user_chunks, password, queue)
 
         for p in processes:
-            p.join()
+            p.join(timeout=60)
+            if p.is_alive():
+                print(f"Process {p.pid} timed out. Terminating.")
+                p.terminate()
 
         results.extend(collect_results(queue))
 

