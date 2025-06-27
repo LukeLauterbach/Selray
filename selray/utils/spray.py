@@ -21,6 +21,8 @@ def main(args, proxies, spray_config):
 
         results.extend(collect_results(queue))
 
+        args.usernames = remove_locked_users(args.usernames, results)
+
         password_id += 1
         print(f"Spray of password '{password}' complete.", end=" ")
         if password_id < len(args.passwords):
@@ -31,6 +33,16 @@ def main(args, proxies, spray_config):
             print("All passwords complete.")
 
     return results
+
+
+def remove_locked_users(usernames, results):
+    locked_users = {entry["USERNAME"] for entry in results if entry["RESULT"] == "LOCKED"}
+
+    for username in locked_users:
+        if username in usernames:
+            usernames.remove(username)
+
+    return usernames
 
 
 def split_usernames(usernames, proxies):
