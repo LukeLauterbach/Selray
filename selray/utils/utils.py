@@ -407,7 +407,7 @@ def attempt_login(spray_config, proxy_url):
         print(f"ERROR - Could not find the username field with key {spray_config.username_field_key} and value "
               f"{spray_config.username_field_value}")
         driver.close()
-        return
+        return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "ERROR"}
 
     # Find the username box
     input_box = driver.find_element(By.XPATH, f"//input[@{spray_config.username_field_key}='{spray_config.username_field_value}']")
