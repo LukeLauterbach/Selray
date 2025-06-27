@@ -381,8 +381,9 @@ def attempt_login(spray_config, proxy_url):
             selenium_options.add_argument(f'--proxy-server={proxy_url}')
         driver = webdriver.Chrome(options=selenium_options)
 
-    driver.set_page_load_timeout(30)
+    driver.set_page_load_timeout(15)
     driver.delete_all_cookies()
+
     for i in range(3):
         try:
             driver.get(spray_config.url)
@@ -474,6 +475,10 @@ def attempt_login(spray_config, proxy_url):
     for conditional_statement in (spray_config.fail + spray_config.success):
         if conditional_statement in driver.page_source:
             result = True
+
+    if list_in_string(string_to_check=driver.page_source.lower(), list_to_compare=spray_config.lockout):
+        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.WARNING}ACCOUNT LOCKOUT{Colors.END}: {spray_config.username}")
+        return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "LOCKED"}
 
     if result and spray_config.success:
         result = "SUCCESS"
