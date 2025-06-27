@@ -551,7 +551,7 @@ def credential_stuffing(spray_config, args, proxies):
             processes.append(p)
 
         for p in processes:
-            p.join(timeout=60)
+            p.join(timeout=180)
             if p.is_alive():
                 print(f"Process {p.pid} timed out. Terminating.")
                 p.terminate()
