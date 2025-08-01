@@ -213,6 +213,8 @@ def print_ending(results):
         for credential in results:
             if credential and credential.get('RESULT') == 'SUCCESS':
                 print(f"{credential['USERNAME']} - {credential['PASSWORD']}")
+    else:
+        print("No valid credentials found.")
 
 
 def import_txt_file(filename):
