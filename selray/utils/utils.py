@@ -1,4 +1,7 @@
 import sys
+
+from charset_normalizer.md__mypyc import exports
+
 from . import aws
 import argparse
 from datetime import datetime, timedelta
@@ -38,6 +41,7 @@ def parse_arguments():
     aws_group = parser.add_argument_group("AWS Proxy Options")
     azure_group = parser.add_argument_group("Azure Proxy Options")
     proxy_group = parser.add_argument_group("Global Proxy Options")
+    experimental_group = parser.add_argument_group("Experimental Options")
 
     required.add_argument('--url',
                           help="(REQUIRED) URL of the website to spray.")
@@ -109,12 +113,16 @@ def parse_arguments():
     aws_group.add_argument("--aws-session-token", help="AWS Session Token (optional)")
     aws_group.add_argument("--aws-region", help="AWS Region (defaults to us-east-2")
 
+    experimental_group.add_argument('-qr', '--quick_ip_rotate', action='store_true', default=False,
+                                    help="(OPTIONAL) Quick IP Rotate, which could result in AWS charges (defaults to False)")
+
     return parser.parse_args()
 
 
 def alternate_modes(args, ec2):
     if args.proxy_clean:
         destroy_proxies(args, ec2)
+        aws.purge_unassigned_eips(ec2)
         exit()
     elif args.proxy_list:
         list_proxies(args, ec2)
@@ -176,7 +184,7 @@ def prepare_lockout(lockout_messages=None):
 
 
 def prepare_url(url=""):
-    if not url.startswith("http://") and not url.startswith("https://"):
+    if url and not url.startswith("http://") and not url.startswith("https://"):
         url = f"https://{url}"  # TODO Check URL and allow http://, if that's all that's supported.
 
     return url
@@ -226,6 +234,8 @@ def import_txt_file(filename):
 
 
 def process_file(filename):
+    if not filename:
+        return []
     if filename.endswith(".txt"):
         return import_txt_file(filename)
     elif filename.endswith(".csv"):
@@ -236,11 +246,7 @@ def process_file(filename):
 
 
 def prepare_success_fail(success="", fail=""):
-    if not success and not fail:
-        print(f"{Colors.FAIL}ERROR - No success or failure condition provided with -s or -f. Only one needs to be "
-              f"provided, but one does need to be provided.{Colors.END}")
-        sys.exit()
-    elif success:
+    if success:
         success = success.split(",")
         fail = []
     elif fail:
@@ -344,7 +350,11 @@ def perform_spray(spray_config, credentials, proxy, queue):
         spray_config.username = credential['USERNAME']
         spray_config.password = credential['PASSWORD']
         if spray_num_with_current_ip >= spray_config.num_sprays_per_ip and proxy['type'] == 'AWS':
-            proxy['ip'], proxy['url'] = aws.refresh_instance_ip(ec2, proxy['id'])
+            if spray_config.quick_rotate:
+                proxy['ip'], proxy['url'] = aws.rotate_eip(ec2, instance_id=proxy['id'])
+            else:
+                proxy['ip'], proxy['url'] = aws.refresh_instance_ip(ec2, proxy['id'])
+            aws.wait_for_instance_to_be_ready((proxy['ip']))
             spray_num_with_current_ip = 0
 
         # `attempt_login` returns a dictionary with:
@@ -357,7 +367,7 @@ def perform_spray(spray_config, credentials, proxy, queue):
         spray_num_with_current_ip += 1
 
     if proxy['type'] == 'AWS':
-        aws.stop_ec2_instance(ec2, proxy['id'])
+            aws.stop_ec2_instance(ec2, proxy['id'])
 
     queue.put(results)
 

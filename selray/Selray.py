@@ -38,7 +38,9 @@ def main():
 
     finally:
         utils.destroy_proxies(args, ec2)
-        utils.print_ending(results)
+        aws.purge_unassigned_eips(ec2)
+        if "results" in locals():
+            utils.print_ending(results)
 
 
 # --------------------------------- #

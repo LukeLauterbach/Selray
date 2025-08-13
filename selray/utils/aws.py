@@ -11,6 +11,15 @@ from rich.console import Console
 from rich.text import Text
 from tqdm import tqdm
 import socket
+import textwrap
+import ipaddress
+from typing import Optional, Dict, Any, List, Iterable
+
+# COLORS
+BOLD_RED = "\033[1;31m"
+RESET = "\033[0m"
+
+# FUNCTION
 
 
 def main(num_proxies=5, clean=False, debug=False):
@@ -150,7 +159,7 @@ def list_instances(ec2_session, security_group_name, region="us-east-2"):
 def proxy_setup(ec2_session, num_proxies=5):
     ssh_key_name = "Selray"
     tasks = ['Creating SSH Keys', 'Creating Security Group', 'Finding AWS OS Image',
-             f'Creating {num_proxies} EC2 Instances', 'Setting Up TinyProxy']
+             f'Creating {num_proxies} EC2 Instances']
     with tqdm(total=len(tasks), desc='Starting...', dynamic_ncols=True) as bar:
         bar.set_description(tasks[0])
         create_ssh_key(ec2_session, ssh_key_name)
@@ -166,11 +175,6 @@ def proxy_setup(ec2_session, num_proxies=5):
 
         bar.set_description(tasks[3])
         ec2_instances = create_ec2_instances(ec2_session, ssh_key_name, ec2_ami, num_proxies)
-        bar.update(1)
-
-        bar.set_description(tasks[4])
-        for ec2_instance in ec2_instances:
-            setup_tinyproxy(ec2_instance['ip'], ssh_key_name, my_ip)
         bar.update(1)
 
     return ec2_instances
@@ -231,41 +235,106 @@ def find_os_ami(ec2_session):
         return None
 
 
-def create_ec2_instances(ec2_session, ssh_key_name, ami_id, num_proxies=5):
-    ec2_resource = ec2_session.resource('ec2')
+def build_user_data_alpine(allowed_ip: str, port: int = 8888) -> str:
+    # Shell script works with cloud-init present. Keep it small.
+    return textwrap.dedent(f"""\
+    #!/bin/sh
+    set -eux
+    apk update
+    apk add --no-cache tinyproxy
+    # Minimal restrictive config
+    sed -i 's/^#\\?Port .*/Port {port}/' /etc/tinyproxy/tinyproxy.conf
+    # reset Allow lines and add only localhost and your IP
+    sed -i '/^Allow /d' /etc/tinyproxy/tinyproxy.conf
+    printf "Allow 127.0.0.1\\nAllow {allowed_ip}/32\\n" >> /etc/tinyproxy/tinyproxy.conf
+    # keep common CONNECT ports
+    grep -q '^ConnectPort 443' /etc/tinyproxy/tinyproxy.conf || printf "ConnectPort 443\\n" >> /etc/tinyproxy/tinyproxy.conf
+    grep -q '^ConnectPort 563' /etc/tinyproxy/tinyproxy.conf || printf "ConnectPort 563\\n" >> /etc/tinyproxy/tinyproxy.conf
+    rc-update add tinyproxy default
+    rc-service tinyproxy restart
+    """)
 
-    instance_type = "t3.micro"
+def _resolve_sg_ids(ec2_client, group_names, vpc_id=None):
+    filters = [{'Name': 'group-name', 'Values': group_names}]
+    if vpc_id:
+        filters.append({'Name': 'vpc-id', 'Values': [vpc_id]})
+    resp = ec2_client.describe_security_groups(Filters=filters)
+    return [sg['GroupId'] for sg in resp['SecurityGroups']]
 
-    # 1GB root volume
+def _default_vpc_id(ec2_client):
+    vpcs = ec2_client.describe_vpcs(Filters=[{'Name': 'isDefault', 'Values': ['true']}])['Vpcs']
+    return vpcs[0]['VpcId'] if vpcs else None
+
+def get_public_ipv4(timeout=2.0) -> str:
+    # Endpoints that return plain IPv4 text with a trailing newline
+    endpoints = [
+        "https://checkip.amazonaws.com",
+        "https://ipv4.icanhazip.com",
+        "https://api.ipify.org",      # defaults to IPv4 for most clients
+    ]
+    for url in endpoints:
+        try:
+            r = requests.get(url, timeout=timeout, headers={"User-Agent": "selray/1.0"})
+            ip_txt = r.text.strip()
+            ip = ipaddress.ip_address(ip_txt)  # raises if invalid
+            if ip.version == 4:
+                return str(ip)
+        except Exception:
+            continue
+    raise RuntimeError("Could not determine public IPv4 address")
+
+def cidr32(ip_str: str) -> str:
+    ip = ipaddress.ip_address(ip_str)
+    if ip.version != 4:
+        raise ValueError(f"Expected IPv4 but got {ip}")
+    return f"{ip}/32"
+
+def create_ec2_instances(ec2_session, ssh_key_name, ami_id, num_proxies=5, my_ip=None):
+    ec2_res = ec2_session.resource('ec2')
+    ec2_cli = ec2_session.client('ec2')
+
+    if not my_ip:
+        my_ip = get_public_ipv4()             # validated IPv4 like "203.0.113.7"
+    my_cidr = cidr32(my_ip)
+
+    # Resolve SG IDs - do not pass names here
+    vpc_id = _default_vpc_id(ec2_cli)
+    sg_ids = _resolve_sg_ids(ec2_cli, ['default', 'Selray'], vpc_id=vpc_id)
+
+    # Keep root volume a bit bigger for updates and logs
     block_device = [{
         'DeviceName': '/dev/sda1',
         'Ebs': {
-            'VolumeSize': 1,
-            'VolumeType': 'gp2',
+            'VolumeSize': 2,          # 2 GiB is still tiny but safer than 1
+            'VolumeType': 'gp3',
+            'DeleteOnTermination': True
         }
     }]
 
-    # Launch the EC2 instances
-    instances = ec2_resource.create_instances(
+    user_data = build_user_data_alpine(my_ip, port=8888) if my_ip else None
+
+    # Launch
+    instances = ec2_res.create_instances(
         ImageId=ami_id,
-        InstanceType=instance_type,
+        InstanceType="t3.micro",
         MinCount=num_proxies,
         MaxCount=num_proxies,
         KeyName=ssh_key_name,
         BlockDeviceMappings=block_device,
-        SecurityGroupIds=['default', 'Selray']
+        SecurityGroupIds=sg_ids,
+        UserData=user_data  # boto3 base64 encodes automatically
     )
 
     ec2_instances = []
-
-    for instance in instances:
-        # Wait for the instance to enter the running state
-        instance.wait_until_running()
-
-        # Reload to get the public IP address
-        instance.reload()
-
-        ec2_instances.append({'type': 'AWS', 'id': instance.id, 'ip': instance.public_ip_address, 'url': f"http://{instance.public_ip_address}:8888"})
+    for inst in instances:
+        inst.wait_until_running()
+        inst.reload()
+        ec2_instances.append({
+            'type': 'AWS',
+            'id': inst.id,
+            'ip': inst.public_ip_address,
+            'url': f"http://{inst.public_ip_address}:8888"
+        })
 
     return ec2_instances
 
@@ -442,10 +511,6 @@ def stop_ec2_instance(ec2_session, instance_id):
         return None
 
 
-import boto3
-import logging
-
-
 def start_ec2_instance(ec2_session, instance_id):
     """
     Starts an EC2 instance by instance ID and returns the new public IP address.
@@ -511,6 +576,274 @@ def get_instance_ip(ec2_session, instance_id):
     except Exception as e:
         logging.debug(f"Error retrieving IP address for instance {instance_id}: {e}")
         return None
+
+
+def rotate_eip(ec2_session,
+    instance_id: str,
+    region_name: Optional[str] = None,
+    profile_name: Optional[str] = None,
+    timeout_seconds: int = 30,
+    poll_interval_seconds: int = 1,
+    dry_run: bool = False,
+    tag_specifications: Optional[list] = None,
+) -> Dict[str, Any]:
+    """
+    Rotate the public IPv4 on an EC2 instance by swapping in a new Elastic IP, then
+    releasing any previously attached Elastic IP to avoid idle EIP charges.
+
+    Works without stopping the instance. There can be a very brief moment with no
+    public IPv4 if the instance already had an Elastic IP, since AWS requires
+    disassociation before association in that case.
+
+    Parameters
+    ----------
+    instance_id : str
+        The EC2 instance ID to update, for example "i-0123456789abcdef0".
+    region_name : Optional[str]
+        AWS region name, for example "us-east-1". If None, uses your default.
+    profile_name : Optional[str]
+        Named profile from your AWS config. If None, uses your default credentials.
+    timeout_seconds : int
+        Max time to wait for the instance to show the new public IP.
+    poll_interval_seconds : int
+        How often to poll during the wait.
+    dry_run : bool
+        If True, perform permission checks only and do not make changes.
+    tag_specifications : Optional[list]
+        Tag specifications to apply to the newly allocated Elastic IP, for example:
+        [
+          {
+            "ResourceType": "elastic-ip",
+            "Tags": [{"Key": "Name", "Value": "ephemeral-rotation"}]
+          }
+        ]
+
+    Returns
+    -------
+    dict with keys:
+      - new_public_ip
+      - new_allocation_id
+      - new_association_id
+      - old_public_ip (may be None)
+      - old_allocation_id (may be None)
+      - old_association_id (may be None)
+
+    Raises
+    ------
+    botocore.exceptions.ClientError on AWS API failures.
+    RuntimeError if the public IP did not switch within the timeout.
+    """
+
+    ec2 = ec2_session.client("ec2")
+
+    # 1) Describe the instance to confirm state and capture current public IP
+    try:
+        resp = ec2.describe_instances(InstanceIds=[instance_id], DryRun=dry_run)
+    except ClientError as e:
+        # If DryRunOperation, the caller has permission. Return quickly.
+        if e.response.get("Error", {}).get("Code") == "DryRunOperation":
+            return {
+                "new_public_ip": None,
+                "new_allocation_id": None,
+                "new_association_id": None,
+                "old_public_ip": None,
+                "old_allocation_id": None,
+                "old_association_id": None,
+                "note": "Dry run succeeded. Caller has required permissions.",
+            }
+        raise
+
+    reservations = resp.get("Reservations", [])
+    if not reservations or not reservations[0].get("Instances"):
+        raise RuntimeError(f"Instance {instance_id} not found")
+
+    inst = reservations[0]["Instances"][0]
+    state = inst["State"]["Name"]
+    if state != "running":
+        raise RuntimeError(f"Instance {instance_id} is not running. Current state: {state}")
+
+    current_public_ip = inst.get("PublicIpAddress")
+    # Primary ENI and its private IP can be useful for advanced flows
+    primary_eni_id = inst["NetworkInterfaces"][0]["NetworkInterfaceId"]
+
+    # 2) Check if there is an existing Elastic IP already associated
+    addr_resp = ec2.describe_addresses(
+        Filters=[{"Name": "instance-id", "Values": [instance_id]}]
+    )
+    old_eip = addr_resp["Addresses"][0] if addr_resp["Addresses"] else None
+    old_allocation_id = old_eip.get("AllocationId") if old_eip else None
+    old_association_id = old_eip.get("AssociationId") if old_eip else None
+    old_public_ip = old_eip.get("PublicIp") if old_eip else None
+
+    # 3) Allocate a fresh Elastic IP in the VPC domain
+    try:
+        alloc_kwargs = {"Domain": "vpc"}
+        if tag_specifications:
+            alloc_kwargs["TagSpecifications"] = tag_specifications
+
+        alloc = ec2.allocate_address(**alloc_kwargs)
+        new_allocation_id = alloc["AllocationId"]
+        new_public_ip = alloc["PublicIp"]
+    except ClientError as e:
+        raise RuntimeError(f"Failed to allocate new Elastic IP: {e}") from e
+
+    # 4) Swap the IPs
+    new_association_id = None
+    try:
+        if old_association_id:
+            # If the instance already has an Elastic IP, disassociate it first
+            ec2.disassociate_address(AssociationId=old_association_id)
+        # Associate the newly allocated EIP to the instance
+        assoc = ec2.associate_address(
+            AllocationId=new_allocation_id,
+            InstanceId=instance_id,
+        )
+        new_association_id = assoc["AssociationId"]
+    except ClientError as e:
+        # Best effort rollback of the newly allocated address to avoid idle charges
+        try:
+            ec2.release_address(AllocationId=new_allocation_id)
+        except ClientError:
+            pass
+        # Try to restore the old EIP if we had one and we disassociated it
+        if old_allocation_id and not old_association_id:
+            try:
+                ec2.associate_address(
+                    AllocationId=old_allocation_id,
+                    InstanceId=instance_id,
+                )
+            except ClientError:
+                pass
+        raise RuntimeError(f"Failed to swap Elastic IPs: {e}") from e
+
+    # 5) Wait until the instance reports the new public IP
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        desc = ec2.describe_instances(InstanceIds=[instance_id])
+        latest = desc["Reservations"][0]["Instances"][0]
+        if latest.get("PublicIpAddress") == new_public_ip:
+            break
+        time.sleep(poll_interval_seconds)
+    else:
+        # Timed out
+        raise RuntimeError(
+            f"Timed out waiting for instance {instance_id} to report new public IP {new_public_ip}"
+        )
+
+    # 6) Release the old Elastic IP, if one existed
+    if old_allocation_id:
+        try:
+            # If still associated, disassociate first
+            if old_association_id:
+                try:
+                    ec2.disassociate_address(AssociationId=old_association_id)
+                except ClientError:
+                    pass
+            ec2.release_address(AllocationId=old_allocation_id)
+        except ClientError as e:
+            # Non-fatal, but you may be charged for an idle EIP if this happens
+            # You can choose to raise here instead
+            print(f"Warning: could not release old Elastic IP {old_allocation_id}: {e}")
+
+    wait_for_instance_to_be_ready(new_public_ip)
+
+    return new_public_ip, f"http://{new_public_ip}:8888"
+
+
+def purge_unassigned_eips(
+    session: boto3.session.Session,
+    regions: Optional[Iterable[str]] = None,
+) -> List[Dict]:
+    """
+    Release Elastic IPs that are not associated to an instance or ENI.
+
+    Uses the provided boto3 Session for all clients. No NAT or NLB checks.
+    If an EIP is actually in use by another service like NAT or NLB, the release
+    call will fail and you will see an error code in the result.
+
+    Args:
+        session: an existing boto3 Session already configured with credentials.
+        regions: iterable of region names to scan. If None, uses the session's
+                 default region if set, otherwise discovers all enabled regions.
+
+    Returns:
+        List of dicts with keys: region, allocation_id, public_ip,
+        released (bool), reason (str or None)
+    """
+    results: List[Dict] = []
+
+    print("Purging unassigned AWS Elastic IPs...")
+    time.sleep(30)
+
+    # Work out which regions to scan
+    if regions is None:
+        if session.region_name:
+            regions = [session.region_name]
+        else:
+            # Discover enabled regions using a generic EC2 client
+            tmp_ec2 = session.client("ec2", region_name="us-east-1")
+            reg_resp = tmp_ec2.describe_regions(AllRegions=False)
+            regions = [r["RegionName"] for r in reg_resp["Regions"]]
+
+    for region in regions:
+        ec2 = session.client("ec2", region_name=region)
+
+        resp = ec2.describe_addresses()
+
+        for addr in resp.get("Addresses", []):
+            allocation_id = addr.get("AllocationId")
+            public_ip = addr.get("PublicIp")
+            association_id = addr.get("AssociationId")
+            instance_id = addr.get("InstanceId")
+            network_interface_id = addr.get("NetworkInterfaceId")
+
+            # Skip any that are clearly attached to EC2 or an ENI
+            if association_id or instance_id or network_interface_id:
+                results.append({
+                    "region": region,
+                    "allocation_id": allocation_id,
+                    "public_ip": public_ip,
+                    "released": False,
+                    "reason": "associated to EC2 or ENI",
+                })
+                continue
+
+            # Try to release
+            try:
+                if allocation_id:
+                    ec2.release_address(AllocationId=allocation_id)
+                else:
+                    # Legacy EC2 Classic style
+                    ec2.release_address(PublicIp=public_ip)
+
+                results.append({
+                    "region": region,
+                    "allocation_id": allocation_id,
+                    "public_ip": public_ip,
+                    "released": True,
+                    "reason": None,
+                })
+            except ClientError as e:
+                code = e.response.get("Error", {}).get("Code")
+                results.append({
+                    "region": region,
+                    "allocation_id": allocation_id,
+                    "public_ip": public_ip,
+                    "released": False,
+                    "reason": f"error: {code}",
+                })
+
+    released_count = sum(1 for r in results if r.get("released") is True)
+    not_released_count = sum(1 for r in results if not r.get("released"))
+
+    if released_count:
+        print(f"Released {released_count} EIP{'s' if released_count != 1 else ''}.")
+    if not_released_count:
+        print(f"{BOLD_RED}Not released {not_released_count} EIP{'s' if not_released_count != 1 else ''}.{RESET}")
+    if not released_count and not not_released_count:
+        print(f"No AWS Elastic IPs found to purge.")
+
+    return results
 
 
 if __name__ == "__main__":
