@@ -11,6 +11,9 @@ from rich.console import Console
 from rich.text import Text
 from tqdm import tqdm
 import socket
+import ipaddress
+import textwrap
+from concurrent.futures import ThreadPoolExecutor
 
 
 def main(num_proxies=5, clean=False, debug=False):
@@ -149,58 +152,27 @@ def list_instances(ec2_session, security_group_name, region="us-east-2"):
 
 def proxy_setup(ec2_session, num_proxies=5):
     ssh_key_name = "Selray"
-    tasks = ['Creating SSH Keys', 'Creating Security Group', 'Finding AWS OS Image',
-             f'Creating {num_proxies} EC2 Instances', 'Setting Up TinyProxy']
+    tasks = ['Creating Security Group', 'Finding AWS OS Image',
+             f'Creating {num_proxies} EC2 Instances', 'Waiting for Proxies to be Available']
     with tqdm(total=len(tasks), desc='Starting...', dynamic_ncols=True) as bar:
-        bar.set_description(tasks[0])
-        create_ssh_key(ec2_session, ssh_key_name)
-        bar.update(1)
 
-        bar.set_description(tasks[1])
+        bar.set_description(tasks[0])
         my_ip = create_security_group(ec2_session, "Selray")
         bar.update(1)
 
-        bar.set_description(tasks[2])
+        bar.set_description(tasks[1])
         ec2_ami = find_os_ami(ec2_session)
         bar.update(1)
 
-        bar.set_description(tasks[3])
+        bar.set_description(tasks[2])
         ec2_instances = create_ec2_instances(ec2_session, ssh_key_name, ec2_ami, num_proxies)
         bar.update(1)
 
-        bar.set_description(tasks[4])
-        for ec2_instance in ec2_instances:
-            setup_tinyproxy(ec2_instance['ip'], ssh_key_name, my_ip)
+        bar.set_description(tasks[3])
+        wait_for_all_instances(ec2_instances)
         bar.update(1)
 
     return ec2_instances
-
-
-
-def setup_tinyproxy(ec2_ip, key_name, my_ip):
-
-    wait_for_instance_to_be_ready(ec2_ip, port=22)
-
-    ssh_client = paramiko.SSHClient()
-    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    key = paramiko.RSAKey.from_private_key_file(f"{key_name}.pem")
-    ssh_client.connect(ec2_ip, username='alpine', pkey=key)
-
-    commands = [
-        "doas -u root apk update",  # Update Alpine Linux
-        "doas -u root apk add tinyproxy",  # Install TinyProxy
-        "doas -u root chown alpine /etc/tinyproxy/tinyproxy.conf",
-        f"echo 'Allow {my_ip}' >> /etc/tinyproxy/tinyproxy.conf",
-        "doas -u root rc-service tinyproxy start",  # Start TinyProxy service
-        "doas -u root rc-update add tinyproxy",  # Ensure TinyProxy starts on boot
-    ]
-
-    for command in commands:
-        stdin, stdout, stderr = ssh_client.exec_command(command)
-        logging.debug(f"Running command: {command}")
-        logging.debug(stdout.read().decode())
-        logging.debug(stderr.read().decode())
-    ssh_client.close()
 
 
 def find_os_ami(ec2_session):
@@ -229,45 +201,6 @@ def find_os_ami(ec2_session):
     else:
         logging.debug(f"No Alpine Linux AMIs found in region {region}. You may need to check for other image IDs manually.")
         return None
-
-
-def create_ec2_instances(ec2_session, ssh_key_name, ami_id, num_proxies=5):
-    ec2_resource = ec2_session.resource('ec2')
-
-    instance_type = "t3.micro"
-
-    # 1GB root volume
-    block_device = [{
-        'DeviceName': '/dev/sda1',
-        'Ebs': {
-            'VolumeSize': 1,
-            'VolumeType': 'gp2',
-        }
-    }]
-
-    # Launch the EC2 instances
-    instances = ec2_resource.create_instances(
-        ImageId=ami_id,
-        InstanceType=instance_type,
-        MinCount=num_proxies,
-        MaxCount=num_proxies,
-        KeyName=ssh_key_name,
-        BlockDeviceMappings=block_device,
-        SecurityGroupIds=['default', 'Selray']
-    )
-
-    ec2_instances = []
-
-    for instance in instances:
-        # Wait for the instance to enter the running state
-        instance.wait_until_running()
-
-        # Reload to get the public IP address
-        instance.reload()
-
-        ec2_instances.append({'type': 'AWS', 'id': instance.id, 'ip': instance.public_ip_address, 'url': f"http://{instance.public_ip_address}:8888"})
-
-    return ec2_instances
 
 
 def wait_for_instance_to_be_ready(ec2_instance, timeout=120, check_interval=5, port=8888):
@@ -305,28 +238,115 @@ def is_port_open(ip, port, timeout=3):
         return False
 
 
-def create_ssh_key(ec2_session, key_name, region_name="us-east-2"):
-    ec2 = ec2_session.client('ec2')
+def wait_for_all_instances(ec2_instances):
+    with ThreadPoolExecutor(max_workers=len(ec2_instances)) as ex:
+        ex.map(wait_for_instance_to_be_ready, ec2_instances)
 
-    # Try deleting existing key pair if it exists
-    try:
-        ec2.delete_key_pair(KeyName=key_name)
-        logging.debug(f"Deleted existing key pair '{key_name}'")
-    except ClientError as e:
-        if "InvalidKeyPair.NotFound" in str(e):
-            logging.debug(f"No existing key pair '{key_name}' to delete.")
-        else:
-            raise
 
-    # Create a new key pair
-    response = ec2.create_key_pair(KeyName=key_name)
-    private_key = response['KeyMaterial']
+def build_user_data_alpine(allowed_ip: str, port: int = 8888) -> str:
+    # Shell script works with cloud-init present. Keep it small.
+    return textwrap.dedent(f"""\
+    #!/bin/sh
+    set -eux
+    apk update
+    apk add --no-cache tinyproxy
+    # Minimal restrictive config
+    sed -i 's/^#\\?Port .*/Port {port}/' /etc/tinyproxy/tinyproxy.conf
+    # reset Allow lines and add only localhost and your IP
+    sed -i '/^Allow /d' /etc/tinyproxy/tinyproxy.conf
+    printf "Allow 127.0.0.1\\nAllow {allowed_ip}/32\\n" >> /etc/tinyproxy/tinyproxy.conf
+    # keep common CONNECT ports
+    grep -q '^ConnectPort 443' /etc/tinyproxy/tinyproxy.conf || printf "ConnectPort 443\\n" >> /etc/tinyproxy/tinyproxy.conf
+    grep -q '^ConnectPort 563' /etc/tinyproxy/tinyproxy.conf || printf "ConnectPort 563\\n" >> /etc/tinyproxy/tinyproxy.conf
+    rc-update add tinyproxy default
+    rc-service tinyproxy restart
+    """)
 
-    # Save the private key
-    with open(f'{key_name}.pem', 'w') as file:
-        file.write(private_key)
+def _resolve_sg_ids(ec2_client, group_names, vpc_id=None):
+    filters = [{'Name': 'group-name', 'Values': group_names}]
+    if vpc_id:
+        filters.append({'Name': 'vpc-id', 'Values': [vpc_id]})
+    resp = ec2_client.describe_security_groups(Filters=filters)
+    return [sg['GroupId'] for sg in resp['SecurityGroups']]
 
-    logging.debug(f'Key pair {key_name} created and saved to {key_name}.pem')
+def _default_vpc_id(ec2_client):
+    vpcs = ec2_client.describe_vpcs(Filters=[{'Name': 'isDefault', 'Values': ['true']}])['Vpcs']
+    return vpcs[0]['VpcId'] if vpcs else None
+
+def get_public_ipv4(timeout=2.0) -> str:
+    # Endpoints that return plain IPv4 text with a trailing newline
+    endpoints = [
+        "https://checkip.amazonaws.com",
+        "https://ipv4.icanhazip.com",
+        "https://api.ipify.org",      # defaults to IPv4 for most clients
+    ]
+    for url in endpoints:
+        try:
+            r = requests.get(url, timeout=timeout, headers={"User-Agent": "selray/1.0"})
+            ip_txt = r.text.strip()
+            ip = ipaddress.ip_address(ip_txt)  # raises if invalid
+            if ip.version == 4:
+                return str(ip)
+        except Exception:
+            continue
+    raise RuntimeError("Could not determine public IPv4 address")
+
+def cidr32(ip_str: str) -> str:
+    ip = ipaddress.ip_address(ip_str)
+    if ip.version != 4:
+        raise ValueError(f"Expected IPv4 but got {ip}")
+    return f"{ip}/32"
+
+
+
+def create_ec2_instances(ec2_session, ssh_key_name, ami_id, num_proxies=5, my_ip=None):
+    ec2_res = ec2_session.resource('ec2')
+    ec2_cli = ec2_session.client('ec2')
+
+    if not my_ip:
+        my_ip = get_public_ipv4()             # validated IPv4 like "203.0.113.7"
+    my_cidr = cidr32(my_ip)
+
+    # Resolve SG IDs - do not pass names here
+    vpc_id = _default_vpc_id(ec2_cli)
+    sg_ids = _resolve_sg_ids(ec2_cli, ['default', 'Selray'], vpc_id=vpc_id)
+
+    # Keep root volume a bit bigger for updates and logs
+    block_device = [{
+        'DeviceName': '/dev/sda1',
+        'Ebs': {
+            'VolumeSize': 2,          # 2 GiB is still tiny but safer than 1
+            'VolumeType': 'gp3',
+            'DeleteOnTermination': True
+        }
+    }]
+
+    user_data = build_user_data_alpine(my_ip, port=8888) if my_ip else None
+
+    # Launch
+    instances = ec2_res.create_instances(
+        ImageId=ami_id,
+        InstanceType="t3.micro",
+        MinCount=num_proxies,
+        MaxCount=num_proxies,
+        KeyName=ssh_key_name,
+        BlockDeviceMappings=block_device,
+        SecurityGroupIds=sg_ids,
+        UserData=user_data  # boto3 base64 encodes automatically
+    )
+
+    ec2_instances = []
+    for inst in instances:
+        inst.wait_until_running()
+        inst.reload()
+        ec2_instances.append({
+            'type': 'AWS',
+            'id': inst.id,
+            'ip': inst.public_ip_address,
+            'url': f"http://{inst.public_ip_address}:8888"
+        })
+
+    return ec2_instances
 
 
 def create_security_group(ec2_session, group_name):
