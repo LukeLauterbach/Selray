@@ -47,7 +47,7 @@ def parse_arguments():
     return args.clean, args.num_proxies, args.aws, args.debug, args.list
 
 
-def get_ec2_session(region_name="us-east-2", access_key=None, secret_key=None, session_token=None):
+def get_ec2_session(region_name=None, access_key=None, secret_key=None, session_token=None):
     try:
         if access_key and secret_key:
             session = boto3.Session(
@@ -153,8 +153,7 @@ def proxy_setup(ec2_session, num_proxies=5):
              f'Creating {num_proxies} EC2 Instances', 'Setting Up TinyProxy']
     with tqdm(total=len(tasks), desc='Starting...', dynamic_ncols=True) as bar:
         bar.set_description(tasks[0])
-        if not os.path.exists(f"{ssh_key_name}.pem"):
-            create_ssh_key(ec2_session, ssh_key_name)
+        create_ssh_key(ec2_session, ssh_key_name)
         bar.update(1)
 
         bar.set_description(tasks[1])

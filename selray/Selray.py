@@ -14,14 +14,16 @@ __version__ = "0.7"
 
 def main():
     args = utils.parse_arguments()
-    ec2 = aws.get_ec2_session(args.aws_region, args.aws_access_key, args.aws_secret_key, args.aws_session_token)
-
-    # Certain modes don't require running the whole script. Check to see if one of those should be executed.
-    utils.alternate_modes(args, ec2)
 
     # Prepare spray configuration
     args = prepare_variables.main(args)
     spray_config = SprayConfig.from_args(args)
+
+    # Connect to AWS, if using proxies
+    ec2 = aws.get_ec2_session(args.aws_region, args.aws_access_key, args.aws_secret_key, args.aws_session_token)
+
+    # Certain modes don't require running the whole script. Check to see if one of those should be executed.
+    utils.alternate_modes(args, ec2)
 
     utils.print_beginning(args, version=__version__)
 

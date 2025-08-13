@@ -107,7 +107,7 @@ def parse_arguments():
     aws_group.add_argument("--aws-access-key", help="AWS Access Key ID")
     aws_group.add_argument("--aws-secret-key", help="AWS Secret Access Key")
     aws_group.add_argument("--aws-session-token", help="AWS Session Token (optional)")
-    aws_group.add_argument("--aws-region", default="us-east-2", help="AWS Region")
+    aws_group.add_argument("--aws-region", help="AWS Region (defaults to us-east-2")
 
     return parser.parse_args()
 
