@@ -28,6 +28,9 @@ class SprayConfig:
 
 
     def prepare_username_fields(self, username_argument_value):
+        if not username_argument_value:
+            return False
+
         username_argument_value = username_argument_value.replace("'", "").replace('"', "")  # Remove quotation marks
 
         username_argument_value = username_argument_value.split("=")
@@ -36,6 +39,9 @@ class SprayConfig:
 
 
     def prepare_password_fields(self, password_argument_value):
+        if not password_argument_value:
+            return False
+
         password_argument_value = password_argument_value.replace("'", "").replace('"', "")  # Remove quotation marks
 
         password_argument_value = password_argument_value.split("=")
