@@ -151,7 +151,6 @@ def list_instances(ec2_session, security_group_name, region="us-east-2"):
 
 
 def proxy_setup(ec2_session, num_proxies=5):
-    ssh_key_name = "Selray"
     tasks = ['Creating Security Group', 'Finding AWS OS Image',
              f'Creating {num_proxies} EC2 Instances', 'Waiting for Proxies to be Available']
     with tqdm(total=len(tasks), desc='Starting...', dynamic_ncols=True) as bar:
@@ -165,7 +164,7 @@ def proxy_setup(ec2_session, num_proxies=5):
         bar.update(1)
 
         bar.set_description(tasks[2])
-        ec2_instances = create_ec2_instances(ec2_session, ssh_key_name, ec2_ami, num_proxies)
+        ec2_instances = create_ec2_instances(ec2_session, ec2_ami, num_proxies)
         bar.update(1)
 
         bar.set_description(tasks[3])
@@ -299,7 +298,7 @@ def cidr32(ip_str: str) -> str:
 
 
 
-def create_ec2_instances(ec2_session, ssh_key_name, ami_id, num_proxies=5, my_ip=None):
+def create_ec2_instances(ec2_session, ami_id, num_proxies=5, my_ip=None):
     ec2_res = ec2_session.resource('ec2')
     ec2_cli = ec2_session.client('ec2')
 
@@ -329,7 +328,6 @@ def create_ec2_instances(ec2_session, ssh_key_name, ami_id, num_proxies=5, my_ip
         InstanceType="t3.micro",
         MinCount=num_proxies,
         MaxCount=num_proxies,
-        KeyName=ssh_key_name,
         BlockDeviceMappings=block_device,
         SecurityGroupIds=sg_ids,
         UserData=user_data  # boto3 base64 encodes automatically
