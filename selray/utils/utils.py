@@ -176,6 +176,8 @@ def prepare_lockout(lockout_messages=None):
 
 
 def prepare_url(url=""):
+    if not url:
+        return False
     if not url.startswith("http://") and not url.startswith("https://"):
         url = f"https://{url}"  # TODO Check URL and allow http://, if that's all that's supported.
 
@@ -226,6 +228,8 @@ def import_txt_file(filename):
 
 
 def process_file(filename):
+    if not filename:
+        return False
     if filename.endswith(".txt"):
         return import_txt_file(filename)
     elif filename.endswith(".csv"):
@@ -236,11 +240,7 @@ def process_file(filename):
 
 
 def prepare_success_fail(success="", fail=""):
-    if not success and not fail:
-        print(f"{Colors.FAIL}ERROR - No success or failure condition provided with -s or -f. Only one needs to be "
-              f"provided, but one does need to be provided.{Colors.END}")
-        sys.exit()
-    elif success:
+    if success:
         success = success.split(",")
         fail = []
     elif fail:
