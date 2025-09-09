@@ -14,3 +14,4 @@ tqdm
 paramiko
 pause
 toml
+patchright
