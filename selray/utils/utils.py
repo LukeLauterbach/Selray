@@ -309,7 +309,7 @@ def print_beginning(args, version=None):
     else:
         spray_duration = "{:02d} {:02d}:{:02d}".format(days, hours, minutes)
 
-    print(f"{Colors.HEADER}{Colors.BOLD}Selenium Spray{Colors.END}")
+    print(f"{Colors.HEADER}{Colors.BOLD}Selray{Colors.END}")
     print(f"Author:  Luke Lauterbach (Sentinel Technologies)")
     print(f"Version: {version}\n")
 

@@ -54,9 +54,6 @@ def main(spray_config, proxy_url):
         context = browser.new_context()
         page = context.new_page()
 
-        # Equivalent to delete_all_cookies
-        context.clear_cookies()
-
         # Try to load URL up to 3 times
         nav_ok = False
         for i in range(3):
@@ -120,7 +117,14 @@ def main(spray_config, proxy_url):
             except Exception:
                 pass
 
-        page.screenshot(path="debug.png")
+        frames = []
+        for iframe in page.query_selector_all("iframe"):
+            frame = iframe.content_frame()
+            if frame:
+                frames.append(frame)
+
+        page.wait_for_load_state("networkidle")
+
         # Early classification checks before password fill
         page_source_lc = page.content().lower()
         if list_in_string(string_to_check=page_source_lc, list_to_compare=spray_config.invalid_username):

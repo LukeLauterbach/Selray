@@ -14,6 +14,7 @@ def main(args):
     args.invalid_username = utils.prepare_invalid_username(invalid_username=args.invalid_username)
     args.lockout = utils.prepare_lockout(lockout_messages=args.lockout)
     args.aws_region = prepare_aws(aws_region=args.aws_region)
+    args.passwordless = utils.prepare_passwordless(passwordless_auth=args.passwordless)
 
     """
     The following variables can be set by a modes file, but any value provided by the user should overwrite the value
