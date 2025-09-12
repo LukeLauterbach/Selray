@@ -5,3 +5,4 @@ fail = "Your account or password is incorrect"
 invalid_username = "We couldn't find an account with that username"
 num_sprays_per_ip = 10
 lockout = "password too many times"
+passwordless = "Open your Authenticator app,Get a code to sign in, Sign in with a passkey,Your device will open a security window"

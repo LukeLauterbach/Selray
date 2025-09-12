@@ -13,7 +13,9 @@ __version__ = "0.7"
 # --------------------------------- #
 
 def main():
+    utils.initialize_playwright()
     args = utils.parse_arguments()
+    results = []
 
     # Prepare spray configuration
     args = prepare_variables.main(args)
