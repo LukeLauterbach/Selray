@@ -126,8 +126,8 @@ def main(spray_config, proxy_url):
         page.wait_for_load_state("networkidle")
 
         # Early classification checks before password fill
-        page_source_lc = page.content().lower()
-        if list_in_string(string_to_check=page_source_lc, list_to_compare=spray_config.invalid_username):
+        page_source = page.content().lower()
+        if list_in_string(string_to_check=page_source, list_to_compare=spray_config.invalid_username):
             print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - USERNAME INVALID: {spray_config.username}")
             context.close()
             browser.close()
@@ -136,7 +136,7 @@ def main(spray_config, proxy_url):
                 "PASSWORD": spray_config.password,
                 "RESULT": "INVALID USERNAME",
             }
-        elif list_in_string(string_to_check=page_source_lc, list_to_compare=spray_config.lockout):
+        elif list_in_string(string_to_check=page_source, list_to_compare=spray_config.lockout):
             print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.WARNING}ACCOUNT LOCKOUT{Colors.END}: {spray_config.username}")
             context.close()
             browser.close()
@@ -145,7 +145,7 @@ def main(spray_config, proxy_url):
                 "PASSWORD": spray_config.password,
                 "RESULT": "LOCKED",
             }
-        elif list_in_string(string_to_check=page_source_lc, list_to_compare=spray_config.passwordless):
+        elif list_in_string(string_to_check=page_source, list_to_compare=spray_config.passwordless):
             print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - PASSWORDLESS: {spray_config.username}")
             context.close()
             browser.close()
@@ -198,11 +198,11 @@ def main(spray_config, proxy_url):
         pw_loc.press("Enter")
 
         # Evaluate result
+        page.wait_for_load_state("networkidle")
         sleep(2)  # allow redirects or async checks
-        page_source = page.content()
-        page_source_lc = page_source.lower()
+        page_source = page.content().lower()
         # Lockout after submit
-        if list_in_string(string_to_check=page_source_lc, list_to_compare=spray_config.lockout):
+        if list_in_string(string_to_check=page_source, list_to_compare=spray_config.lockout):
             print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.WARNING}ACCOUNT LOCKOUT{Colors.END}: {spray_config.username}")
             context.close()
             browser.close()
