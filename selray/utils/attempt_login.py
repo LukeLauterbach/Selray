@@ -54,9 +54,6 @@ def main(spray_config, proxy_url):
         context = browser.new_context()
         page = context.new_page()
 
-        # Equivalent to delete_all_cookies
-        context.clear_cookies()
-
         # Try to load URL up to 3 times
         nav_ok = False
         for i in range(3):
@@ -101,14 +98,14 @@ def main(spray_config, proxy_url):
         user_loc.clear()
         user_loc.fill(spray_config.username)
 
+        # Hit Enter on username field to advance
+        user_loc.press("Enter")
+        sleep(1)
+
         # Try to locate password field directly
         try:
             page.wait_for_selector(f"xpath={pw_xpath}", state="visible", timeout=1000)
         except TimeoutError:
-            # Hit Enter on username field to advance
-            user_loc.press("Enter")
-            sleep(1)
-
             # Microsoft special case
             try:
                 page_content = page.content()
@@ -120,9 +117,17 @@ def main(spray_config, proxy_url):
             except Exception:
                 pass
 
+        frames = []
+        for iframe in page.query_selector_all("iframe"):
+            frame = iframe.content_frame()
+            if frame:
+                frames.append(frame)
+
+        page.wait_for_load_state("networkidle")
+
         # Early classification checks before password fill
-        page_source_lc = page.content().lower()
-        if list_in_string(string_to_check=page_source_lc, list_to_compare=spray_config.invalid_username):
+        page_source = page.content().lower()
+        if list_in_string(string_to_check=page_source, list_to_compare=spray_config.invalid_username):
             print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - USERNAME INVALID: {spray_config.username}")
             context.close()
             browser.close()
@@ -131,7 +136,7 @@ def main(spray_config, proxy_url):
                 "PASSWORD": spray_config.password,
                 "RESULT": "INVALID USERNAME",
             }
-        elif list_in_string(string_to_check=page_source_lc, list_to_compare=spray_config.lockout):
+        elif list_in_string(string_to_check=page_source, list_to_compare=spray_config.lockout):
             print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.WARNING}ACCOUNT LOCKOUT{Colors.END}: {spray_config.username}")
             context.close()
             browser.close()
@@ -140,7 +145,7 @@ def main(spray_config, proxy_url):
                 "PASSWORD": spray_config.password,
                 "RESULT": "LOCKED",
             }
-        elif list_in_string(string_to_check=page_source_lc, list_to_compare=spray_config.passwordless):
+        elif list_in_string(string_to_check=page_source, list_to_compare=spray_config.passwordless):
             print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - PASSWORDLESS: {spray_config.username}")
             context.close()
             browser.close()
@@ -193,12 +198,11 @@ def main(spray_config, proxy_url):
         pw_loc.press("Enter")
 
         # Evaluate result
+        page.wait_for_load_state("networkidle")
         sleep(2)  # allow redirects or async checks
-        page_source = page.content()
-        page_source_lc = page_source.lower()
-
+        page_source = page.content().lower()
         # Lockout after submit
-        if list_in_string(string_to_check=page_source_lc, list_to_compare=spray_config.lockout):
+        if list_in_string(string_to_check=page_source, list_to_compare=spray_config.lockout):
             print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.WARNING}ACCOUNT LOCKOUT{Colors.END}: {spray_config.username}")
             context.close()
             browser.close()
@@ -208,23 +212,20 @@ def main(spray_config, proxy_url):
                 "RESULT": "LOCKED",
             }
 
-        seen_flag = False
-        for s in (spray_config.fail + spray_config.success):
-            if s in page_source:
-                seen_flag = True
-                break
+        result = "ERROR"
+        if spray_config.success:
+            for s in spray_config.success:
+                if s.lower() in page_source:
+                    result = "SUCCESS"
+            if result != "SUCCESS":
+                result = "INVALID"
 
-        if seen_flag and spray_config.success:
-            result = "SUCCESS"
-        elif not seen_flag and spray_config.fail:
-            result = "SUCCESS"
-        elif seen_flag and spray_config.fail:
-            result = "INVALID"
-        elif not seen_flag and spray_config.success:
-            result = "INVALID"
-        else:
-            # Fallback if neither list is provided or nothing matched
-            result = "INVALID"
+        if spray_config.fail:
+            for s in spray_config.fail:
+                if s.lower() in page_source:
+                    result = "INVALID"
+            if result != "INVALID":
+                result = "SUCCESS"
 
         context.close()
         browser.close()
