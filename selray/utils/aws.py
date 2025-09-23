@@ -348,39 +348,84 @@ def create_ec2_instances(ec2_session, ami_id, num_proxies=5, my_ip=None):
 
 
 def create_security_group(ec2_session, group_name):
+    """
+    Create the security group if missing, then ensure ingress for the caller's
+    current external IP, pruning older managed /32 rules.
+    """
     ec2 = ec2_session.client('ec2')
 
-    # Get current external IP
-    my_ip = requests.get('https://checkip.amazonaws.com').text.strip()
+    # Tag used to identify rules managed by this function
+    MANAGED_DESC = "managed-by:create_security_group_for_my_ip"
 
-    # Check if the security group "Selray" exists
-    response = ec2.describe_security_groups(Filters=[{'Name': 'group-name', 'Values': [group_name]}])
+    # Get current external IP
+    my_ip = requests.get('https://checkip.amazonaws.com', timeout=5).text.strip()
+    my_cidr = f"{my_ip}/32"
+
+    # Find or create the SG
+    response = ec2.describe_security_groups(
+        Filters=[{'Name': 'group-name', 'Values': [group_name]}]
+    )
 
     if response['SecurityGroups']:
-        logging.debug(f"Security group '{group_name}' already exists.")
+        sg = response['SecurityGroups'][0]
+        security_group_id = sg['GroupId']
+        logging.debug(f"Security group '{group_name}' already exists ({security_group_id}).")
     else:
         logging.debug(f"Security group '{group_name}' not found. Creating it now...")
-
-        # Create the security group
         create_response = ec2.create_security_group(
             GroupName=group_name,
             Description='Security group that allows any port from my current external IP.',
         )
-
         security_group_id = create_response['GroupId']
         logging.debug(f"Created security group with ID: {security_group_id}")
 
-        # Allow inbound traffic on all ports from the current external IP
-        ec2.authorize_security_group_ingress(
-            GroupId=security_group_id,
-            IpPermissions=[{
-                'IpProtocol': '-1',  # This allows all ports
-                'FromPort': 0,
-                'ToPort': 65535,
-                'IpRanges': [{'CidrIp': f'{my_ip}/32'}]
-            }]
-        )
-        logging.debug(f"Added inbound rule allowing all ports from {my_ip}/32 to 'Selray'.")
+    # Refresh SG description so we can read current rules
+    sg_desc = ec2.describe_security_groups(GroupIds=[security_group_id])['SecurityGroups'][0]
+    current_perms = sg_desc.get('IpPermissions', [])
+
+    # Check if we already have an all-ports rule for my current IP
+    has_current_ip = False
+    old_managed = []  # list of (perm_proto, from_port, to_port, cidr) to revoke
+
+    for perm in current_perms:
+        proto = perm.get('IpProtocol')
+        for r in perm.get('IpRanges', []):
+            cidr = r.get('CidrIp')
+            desc = r.get('Description', '')
+            if cidr == my_cidr and proto == '-1':
+                has_current_ip = True
+            # Collect old managed entries that are not my current IP
+            if desc == MANAGED_DESC and cidr != my_cidr:
+                if proto == '-1':
+                    old_managed.append({'IpProtocol': '-1',
+                                        'IpRanges': [{'CidrIp': cidr, 'Description': MANAGED_DESC}]})
+                else:
+                    old_managed.append({'IpProtocol': proto,
+                                        'FromPort': perm.get('FromPort'),
+                                        'ToPort': perm.get('ToPort'),
+                                        'IpRanges': [{'CidrIp': cidr, 'Description': MANAGED_DESC}]})
+
+    # Add rule for current IP if missing
+    if not has_current_ip:
+        try:
+            # For IpProtocol='-1', omit FromPort and ToPort
+            ec2.authorize_security_group_ingress(
+                GroupId=security_group_id,
+                IpPermissions=[{
+                    'IpProtocol': '-1',
+                    'IpRanges': [{'CidrIp': my_cidr, 'Description': MANAGED_DESC}]
+                }]
+            )
+            logging.debug(f"Added inbound rule allowing all ports from {my_cidr} to '{group_name}'.")
+        except ClientError as e:
+            if e.response['Error']['Code'] != 'InvalidPermission.Duplicate':
+                raise
+            logging.debug("Rule already present, skipping duplicate add.")
+
+    # Revoke old managed IPs
+    if old_managed:
+        ec2.revoke_security_group_ingress(GroupId=security_group_id, IpPermissions=old_managed)
+        logging.debug(f"Pruned {len(old_managed)} old managed inbound rule(s).")
 
     return my_ip
 
