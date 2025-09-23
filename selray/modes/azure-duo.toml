@@ -1,0 +1,10 @@
+username_field = 'type="email"'
+password_field = 'type="password"'
+fail = "Invalid credentials"
+url = "https://portal.azure.com"
+pre_login_code = """
+page.locator('input[type="email"]').fill(f"{spray_config.username}")
+page.locator('input[type="email"]').press("Enter")
+from time import sleep
+sleep(1)
+"""
