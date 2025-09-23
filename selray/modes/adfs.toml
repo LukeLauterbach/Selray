@@ -3,9 +3,12 @@ password_field = 'type="password"'
 fail = "Incorrect user ID or password"
 pre_login_code = """
 try:
-    WebDriverWait(driver, 5).until(ec.element_to_be_clickable((By.ID, "idp_SignInButton")))
-    sign_in_button = driver.find_element(By.ID, "idp_SignInButton")
+    # Wait up to 5 seconds for the button to be visible and enabled
+    sign_in_button = page.locator("#idp_SignInButton")
+    sign_in_button.wait_for(state="visible", timeout=5000)
+
+    # Click it
     sign_in_button.click()
-except Exception:
+except PlaywrightTimeoutError:
     pass
 """

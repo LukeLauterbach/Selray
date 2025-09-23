@@ -74,9 +74,7 @@ def main(spray_config, proxy_url):
 
         # Execute Before Code
         if getattr(spray_config, "pre_login_code", None):
-            # Give the hook access to page, context, browser if the user wants it
-            local_vars = {"page": page, "context": context, "browser": browser}
-            exec(spray_config.pre_login_code, {}, local_vars)
+            exec(spray_config.pre_login_code, {}, locals())
 
         # Wait for username field
         try:
@@ -95,11 +93,21 @@ def main(spray_config, proxy_url):
 
         # Fill username
         user_loc = page.locator(f"xpath={user_xpath}")
-        user_loc.clear()
+        user_loc.wait_for(state="visible", timeout=10000)
         user_loc.fill(spray_config.username)
 
+        # Make sure the field has focus before pressing Enter
+        try:
+            user_loc.focus()
+        except Exception:
+            pass  # focus may fail if already focused; that's fine
+
         # Hit Enter on username field to advance
-        user_loc.press("Enter")
+        try:
+            user_loc.press("Enter")
+        except Exception:
+            page.keyboard.press("Enter")
+
         sleep(1)
 
         # Try to locate password field directly
@@ -123,7 +131,8 @@ def main(spray_config, proxy_url):
             if frame:
                 frames.append(frame)
 
-        page.wait_for_load_state("networkidle")
+        pw_loc = page.locator(f"xpath={pw_xpath}").first
+        pw_loc.wait_for(state="visible", timeout=5000)
 
         # Early classification checks before password fill
         page_source = page.content().lower()
@@ -166,7 +175,8 @@ def main(spray_config, proxy_url):
 
         # Wait for and fill password
         try:
-            page.wait_for_selector(f"xpath={pw_xpath}", state="visible", timeout=3000)
+            pw_loc = page.locator(f"xpath={pw_xpath}").first
+            pw_loc.wait_for(state="visible", timeout=10000)
         except TimeoutError:
             print(
                 f"ERROR - Could not find the password field with key '{spray_config.password_field_key}' and value '{spray_config.password_field_value}'"
@@ -182,7 +192,6 @@ def main(spray_config, proxy_url):
         pw_loc = page.locator(f"xpath={pw_xpath}")
         pw_loc.clear()
         pw_loc.fill(spray_config.password)
-
         # Optional checkbox
         if checkbox_xpath:
             try:
