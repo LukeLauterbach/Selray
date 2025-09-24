@@ -108,22 +108,9 @@ def main(spray_config, proxy_url):
         except Exception:
             page.keyboard.press("Enter")
 
-        sleep(1)
-
-        # Try to locate password field directly
-        try:
-            page.wait_for_selector(f"xpath={pw_xpath}", state="visible", timeout=1000)
-        except TimeoutError:
-            # Microsoft special case
-            try:
-                page_content = page.content()
-                if ("Microsoft" in page_content) and ("Work or school account" in page_content):
-                    work_box = page.locator("xpath=//div[@id='aadTile']")
-                    if work_box.count() > 0:
-                        work_box.first.click()
-                        sleep(1)
-            except Exception:
-                pass
+        # Execute Before Code
+        if getattr(spray_config, "pre_password_code", None):
+            exec(spray_config.pre_password_code, {}, locals())
 
         frames = []
         for iframe in page.query_selector_all("iframe"):
@@ -131,8 +118,11 @@ def main(spray_config, proxy_url):
             if frame:
                 frames.append(frame)
 
-        pw_loc = page.locator(f"xpath={pw_xpath}").first
-        pw_loc.wait_for(state="visible", timeout=5000)
+        try:
+            pw_loc = page.locator(f"xpath={pw_xpath}").first
+            pw_loc.wait_for(state="visible", timeout=5000)
+        except TimeoutError:
+            pass
 
         # Early classification checks before password fill
         page_source = page.content().lower()
