@@ -13,6 +13,7 @@ __version__ = "0.7"
 # --------------------------------- #
 
 def main():
+    results = []
     utils.initialize_playwright()
     args = utils.parse_arguments()
 

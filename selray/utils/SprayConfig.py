@@ -2,7 +2,7 @@ class SprayConfig:
     def __init__(self, url, username_field_key, username_field_value,
                  password_field_key, password_field_value, checkbox_key, checkbox_value,
                  fail, success, invalid_username, num_sprays_per_ip, aws_access_key, aws_secret_key,
-                 aws_session_token, aws_region, lockout, threads, pre_login_code, passwordless, headless):
+                 aws_session_token, aws_region, lockout, threads, pre_login_code, pre_password_code, passwordless, headless):
         self.username = None
         self.password = None
         self.url = url
@@ -23,6 +23,7 @@ class SprayConfig:
         self.lockout = lockout
         self.threads = threads
         self.pre_login_code = pre_login_code
+        self.pre_password_code = pre_password_code
         self.passwordless = passwordless
         self.headless = headless
 
@@ -69,6 +70,7 @@ class SprayConfig:
             lockout=args.lockout,
             threads=args.threads,
             pre_login_code=getattr(args, "pre_login_code", ""),
+            pre_password_code=getattr(args, "pre_password_code", ""),
             passwordless=getattr(args, "passwordless", ""),
             # This next one is confusing. We're flipping from "no headless" to "headless".
             headless=not getattr(args, "no_headless", True)
