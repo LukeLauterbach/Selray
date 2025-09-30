@@ -91,6 +91,8 @@ def parse_arguments():
                           help="(OPTIONAL) If a checkbox is required, provide a unique attribute of the checkbox, "
                                "allowing the script to automatically check it. For example, if "
                                "'<input type='checkbox'>', enter 'type='checkbox''")
+    optional.add_argument('-fp', '--file_prefix', type=str, default='',
+                          help="(OPTIONAL) Prefix for the output file names.")
 
     optional.add_argument('--update', action='store_true',
                           help="(OPTIONAL) Update the script to the latest version (Only works if installed with PIPX).")
