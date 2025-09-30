@@ -16,6 +16,9 @@ def main(args):
     args.aws_region = prepare_aws(aws_region=args.aws_region)
     args.passwordless = utils.prepare_passwordless(passwordless_auth=args.passwordless)
 
+    if args.file_prefix:
+        args.file_prefix = args.file_prefix + "_"
+
     """
     The following variables can be set by a modes file, but any value provided by the user should overwrite the value
     provided by the modes file.

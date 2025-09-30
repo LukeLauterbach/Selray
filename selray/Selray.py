@@ -1,4 +1,4 @@
-from selray.utils import aws, utils, prepare_variables, spray
+from selray.utils import aws, utils, prepare_variables, spray,write_output_files
 from selray.utils.SprayConfig import SprayConfig
 
 # --------------------------------- #
@@ -41,6 +41,7 @@ def main():
     finally:
         utils.destroy_proxies(args, ec2)
         utils.print_ending(results)
+        write_output_files.main(args, results)
 
 
 # --------------------------------- #
