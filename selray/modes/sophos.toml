@@ -1,0 +1,3 @@
+username_field = 'id="username"'
+password_field = 'id="password"'
+fail = "Login failed"
