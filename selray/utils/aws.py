@@ -254,9 +254,6 @@ def build_user_data_alpine(allowed_ip: str, port: int = 8888) -> str:
     # reset Allow lines and add only localhost and your IP
     sed -i '/^Allow /d' /etc/tinyproxy/tinyproxy.conf
     printf "Allow 127.0.0.1\\nAllow {allowed_ip}/32\\n" >> /etc/tinyproxy/tinyproxy.conf
-    # keep common CONNECT ports
-    grep -q '^ConnectPort 443' /etc/tinyproxy/tinyproxy.conf || printf "ConnectPort 443\\n" >> /etc/tinyproxy/tinyproxy.conf
-    grep -q '^ConnectPort 563' /etc/tinyproxy/tinyproxy.conf || printf "ConnectPort 563\\n" >> /etc/tinyproxy/tinyproxy.conf
     rc-update add tinyproxy default
     rc-service tinyproxy restart
     """)
