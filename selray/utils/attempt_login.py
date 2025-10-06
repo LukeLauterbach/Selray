@@ -36,6 +36,7 @@ def main(spray_config, proxy_url):
         "headless": bool(spray_config.headless),
         "timeout": 15000,  # 15s default for browser contexts and actions
     }
+    launch_kwargs.setdefault("args", []).append("--ignore-certificate-errors")
     if proxy_url:
         # Playwright expects a server in scheme://host:port
         launch_kwargs["proxy"] = {"server": proxy_url}
@@ -51,7 +52,7 @@ def main(spray_config, proxy_url):
 
     with sync_playwright() as p:
         browser = p.chromium.launch(**launch_kwargs)
-        context = browser.new_context()
+        context = browser.new_context(ignore_https_errors=True)
         page = context.new_page()
 
         # Try to load URL up to 3 times
