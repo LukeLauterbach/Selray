@@ -93,6 +93,8 @@ def parse_arguments():
                                "'<input type='checkbox'>', enter 'type='checkbox''")
     optional.add_argument('-fp', '--file_prefix', type=str, default='',
                           help="(OPTIONAL) Prefix for the output file names.")
+    optional.add_argument('-lm','--list_modes', action='store_true', default=False,
+                          help="(OPTIONAL) List all built-in modes available")
 
     optional.add_argument('--update', action='store_true',
                           help="(OPTIONAL) Update the script to the latest version (Only works if installed with PIPX).")
@@ -125,6 +127,9 @@ def alternate_modes(args, ec2):
         exit()
     elif args.update:
         update.self_update()
+        exit()
+    elif args.list_modes:
+        list_modes()
         exit()
 
 
@@ -436,3 +441,24 @@ def initialize_playwright():
 
     # Only needed for the first time run, but won't error on later runs
     subprocess.run([patchright_cmd, "install"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def list_modes(base_path="selray/modes", output_to_terminal=True):
+    try:
+        # List all files in the directory
+        filenames = [
+            f for f in os.listdir(base_path)
+            if os.path.isfile(os.path.join(base_path, f))
+        ]
+    except FileNotFoundError:
+        print(f"Error: The folder '{base_path}' does not exist.")
+        return []
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return []
+
+    if output_to_terminal:
+        for filename in filenames:
+            print(filename.removesuffix(".toml"))
+
+    return filenames

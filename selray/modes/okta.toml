@@ -1,0 +1,4 @@
+username_field = 'name="identifier'
+password_field = 'type="password"'
+fail = 'Unable to sign in'
+num_sprays_per_ip = 3
