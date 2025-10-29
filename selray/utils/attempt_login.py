@@ -198,6 +198,10 @@ def main(spray_config, proxy_url):
         pw_loc.click()
         pw_loc.press("Enter")
 
+        # Execute Post Login Code
+        if getattr(spray_config, "post_login_code", None):
+            exec(spray_config.post_login_code, {}, locals())
+
         # Evaluate result
         page.wait_for_load_state("networkidle")
         sleep(2)  # allow redirects or async checks
