@@ -181,7 +181,7 @@ def main(spray_config, proxy_url):
             }
 
         pw_loc = page.locator(f"xpath={pw_xpath}")
-        pw_loc.clear()
+        pw_loc.click()
         pw_loc.fill(spray_config.password)
         # Optional checkbox
         if checkbox_xpath:
@@ -195,6 +195,7 @@ def main(spray_config, proxy_url):
                 )
 
         # Submit
+        pw_loc.click()
         pw_loc.press("Enter")
 
         # Evaluate result
