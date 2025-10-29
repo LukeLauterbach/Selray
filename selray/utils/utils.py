@@ -18,6 +18,7 @@ import importlib.resources
 from . import azure_proxy, update, attempt_login
 import subprocess
 from pathlib import Path
+from importlib import resources as importlib_resources
 
 
 class Colors:
@@ -446,22 +447,15 @@ def initialize_playwright():
     subprocess.run([patchright_cmd, "install"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def list_modes(base_path="selray/modes", output_to_terminal=True):
-    try:
-        # List all files in the directory
-        filenames = [
-            f for f in os.listdir(base_path)
-            if os.path.isfile(os.path.join(base_path, f))
-        ]
-    except FileNotFoundError:
-        print(f"Error: The folder '{base_path}' does not exist.")
-        return []
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        return []
+def list_modes(output_to_terminal=True):
+    base = importlib_resources.files("selray").joinpath("modes")
+    filenames = [p.name for p in base.iterdir() if p.is_file()]
+    filenames = [os.path.splitext(n)[0] for n in filenames]
+    filenames = sorted(filenames)
 
     if output_to_terminal:
+        print("Available Modes:")
         for filename in filenames:
-            print(filename.removesuffix(".toml"))
+            print(f"  • {filename.removesuffix('.toml')}")
 
     return filenames

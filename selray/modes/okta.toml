@@ -1,4 +1,11 @@
 username_field = 'name="identifier'
 password_field = 'type="password"'
+delay = 120
 fail = 'Unable to sign in'
 num_sprays_per_ip = 3
+post_login_code = '''
+from time import sleep
+sleep(1)
+if "unable to sign in" not in page.content().lower():
+    page.locator("input[type='submit'][value='Sign in']").click()
+'''
