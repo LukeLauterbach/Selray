@@ -1,9 +1,10 @@
+from os import environ
+
 class SprayConfig:
     def __init__(self, url, username_field_key, username_field_value,
                  password_field_key, password_field_value, checkbox_key, checkbox_value,
-                 fail, success, invalid_username, num_sprays_per_ip, aws_access_key, aws_secret_key,
-                 aws_session_token, aws_region, lockout, threads, pre_login_code, pre_password_code, post_login_code,
-                 passwordless, headless):
+                 fail, success, invalid_username, num_sprays_per_ip, lockout, threads, pre_login_code, pre_password_code, post_login_code,
+                 passwordless, headless, azure, azure_subscription_id, azure_resource_group, azure_location):
         self.username = None
         self.password = None
         self.url = url
@@ -17,10 +18,6 @@ class SprayConfig:
         self.success = success
         self.invalid_username = invalid_username
         self.num_sprays_per_ip = num_sprays_per_ip
-        self.aws_access_key = aws_access_key
-        self.aws_secret_key = aws_secret_key
-        self.aws_region = aws_region
-        self.aws_session_token = aws_session_token
         self.lockout = lockout
         self.threads = threads
         self.pre_login_code = pre_login_code
@@ -28,6 +25,10 @@ class SprayConfig:
         self.post_login_code = post_login_code
         self.passwordless = passwordless
         self.headless = headless
+        self.azure = azure
+        self.azure_subscription_id = azure_subscription_id
+        self.azure_resource_group = azure_resource_group
+        self.azure_location = azure_location
 
 
     def prepare_username_fields(self, username_argument_value):
@@ -51,6 +52,16 @@ class SprayConfig:
         self.password_field_key = password_argument_value[0]
         self.password_field_value = password_argument_value[1]
 
+
+    def prepare_azure_variables(self):
+        if not self.azure_resource_group:
+            self.azure_resource_group = environ.get("AZURE_RG", "")
+        if not self.azure_location:
+            self.azure_location = environ.get("AZURE_LOCATION", "eastus")
+        if not self.azure_subscription_id:
+            self.azure_subscription_id = environ.get("AZURE_SUBSCRIPTION_ID", "")
+
+
     @classmethod
     def from_args(cls, args):
         instance = cls(
@@ -65,10 +76,6 @@ class SprayConfig:
             success=args.success,
             invalid_username=args.invalid_username,
             num_sprays_per_ip=args.num_sprays_per_ip,
-            aws_region=args.aws_region,
-            aws_access_key=args.aws_access_key,
-            aws_secret_key=args.aws_secret_key,
-            aws_session_token=args.aws_session_token,
             lockout=args.lockout,
             threads=args.threads,
             pre_login_code=getattr(args, "pre_login_code", ""),
@@ -76,10 +83,15 @@ class SprayConfig:
             post_login_code=getattr(args, "post_login_code", ""),
             passwordless=getattr(args, "passwordless", ""),
             # This next one is confusing. We're flipping from "no headless" to "headless".
-            headless=not getattr(args, "no_headless", True)
+            headless=not getattr(args, "no_headless", True),
+            azure=getattr(args, "azure", False),
+            azure_subscription_id=getattr(args, "azure_subscription_id", ""),
+            azure_resource_group=getattr(args, "azure_resource_group", ""),
+            azure_location=getattr(args, "azure_location", ""),
         )
 
         instance.prepare_username_fields(args.username_field)
         instance.prepare_password_fields(args.password_field)
+        instance.prepare_azure_variables()
 
         return instance

@@ -3,18 +3,21 @@ from multiprocessing import Process, Queue
 from . import utils
 import pause
 
-def main(args, proxies, spray_config):
+def main(args, spray_config):
     results = []
     password_id = 0
 
     while password_id < len(args.passwords):
         password = args.passwords[password_id]
         next_start_time = datetime.now() + timedelta(minutes=args.delay)
-        print(f"Beginning spray with password '{password}'")
+        if password:
+            print(f"Beginning spray with password '{password}'")
+        else:
+            print(f"Beginning user enumeration")
 
-        user_chunks = split_usernames(args.usernames, proxies)
+        user_chunks = split_usernames(args)
         queue = Queue()
-        processes = launch_spray_processes(spray_config, proxies, user_chunks, password, queue)
+        processes = launch_spray_processes(spray_config, user_chunks, password, queue)
 
         for p in processes:
             p.join()
@@ -45,16 +48,16 @@ def remove_locked_users(usernames, results):
     return usernames
 
 
-def split_usernames(usernames, proxies):
-    chunk_size = (len(usernames) + len(proxies) - 1) // len(proxies)
-    return [usernames[i:i + chunk_size] for i in range(0, len(usernames), chunk_size)]
+def split_usernames(args):
+    chunk_size = (len(args.usernames) + args.threads - 1) // args.threads
+    return [args.usernames[i:i + chunk_size] for i in range(0, len(args.usernames), chunk_size)]
 
 
-def launch_spray_processes(spray_config, proxies, user_chunks, password, queue):
+def launch_spray_processes(spray_config, user_chunks, password, queue):
     processes = []
-    for proxy, user_chunk in zip(proxies, user_chunks):
+    for user_chunk in user_chunks:
         credentials = [{'USERNAME': username, 'PASSWORD': password} for username in user_chunk]
-        p = Process(target=utils.perform_spray, args=(spray_config, credentials, proxy, queue))
+        p = Process(target=utils.perform_spray, args=(spray_config, credentials, queue))
         p.start()
         processes.append(p)
     return processes
