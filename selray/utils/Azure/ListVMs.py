@@ -1,4 +1,6 @@
 from typing import Optional, List, Dict
+from rich.console import Console
+from rich.table import Table
 from .AzureAuth import get_azure_context, make_azure_clients
 
 
@@ -39,6 +41,13 @@ def list_selray_vms(
         _, _, _, compute_client = make_azure_clients(subscription_id)
 
     results: List[Dict[str, str]] = []
+    table = None
+    if print_output:
+        table = Table(title="Selray VMs")
+        table.add_column("Name", style="cyan", no_wrap=True)
+        table.add_column("Resource Group", style="green")
+        table.add_column("Location", style="magenta")
+        table.add_column("Owner", style="yellow")
 
     for vm in compute_client.virtual_machines.list_all():
         vm_tags = vm.tags or {}
@@ -67,18 +76,15 @@ def list_selray_vms(
         }
         results.append(entry)
 
-        if print_output:
-            if owner is not None:
-                print(
-                    f"- {vm_name}  (RG={rg}, location={vm.location}, owner={vm_tags.get(owner_tag_key)})"
-                )
-            else:
-                print(
-                    f"- {vm_name}  (RG={rg}, location={vm.location}, owner={vm_tags.get(owner_tag_key, 'unknown')})"
-                )
+        if print_output and table:
+            owner_value = vm_tags.get(owner_tag_key, "unknown")
+            table.add_row(vm_name, rg, vm.location, owner_value)
 
     if print_output:
-        print(f"\nTotal matched VMs: {len(results)}")
+        console = Console()
+        if table:
+            console.print(table)
+        console.print(f"Total matched VMs: {len(results)}")
 
     return results
 

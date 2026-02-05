@@ -7,7 +7,7 @@ from selray.utils.Azure import get_azure_context
 # GLOBAL VARIABLES                  #
 # --------------------------------- #
 
-__version__ = "0.8"
+__version__ = "1.0"
 
 
 # --------------------------------- #

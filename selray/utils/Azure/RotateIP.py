@@ -140,8 +140,6 @@ def rotate_ip_if_needed(resource_group,
                         nic_name = None,
                         location = "eastus"):
 
-    print(current_attempt)
-
     if not network_client or not compute_client:
         credential, subscription_id = get_azure_context()
         cred, resource_client, network_client, compute_client = make_azure_clients(subscription_id)
