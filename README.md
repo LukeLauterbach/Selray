@@ -20,6 +20,8 @@ Selray is a password spraying utility that leverages Selenium to avoid tradition
 
 ![Example Screenshot](assets/screenshots/example.png)
 
+Note: Selray no longer supports manual proxies or AWS proxies. If either were to be requested again, I'd be happy to re-add them. 
+
 ## 🚀 Usage
 
 ### Examples

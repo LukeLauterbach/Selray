@@ -9,6 +9,7 @@ import os
 from random import randint
 from string import ascii_lowercase,digits
 from secrets import choice
+import re
 
 LOCATION = os.environ.get("AZURE_LOCATION", "eastus")
 
@@ -46,6 +47,19 @@ def ensure_rg(resource_client: ResourceManagementClient, resource_group_name) ->
 def rand_suffix(n: int = 6) -> str:
     alphabet = ascii_lowercase + digits
     return "".join(choice(alphabet) for _ in range(n))
+
+def sanitize_vm_name(name: str, max_len: int = 80) -> str:
+    # Azure VM names allow word chars plus '.', '-', '_' and must start/end with a word char.
+    allowed = re.compile(r"[^A-Za-z0-9_.-]")
+    cleaned = allowed.sub("-", name).strip()
+    if not cleaned or not re.match(r"^[A-Za-z0-9_]", cleaned):
+        cleaned = f"s{cleaned}"
+    if max_len > 0 and len(cleaned) > max_len:
+        cleaned = cleaned[:max_len]
+    cleaned = re.sub(r"[^A-Za-z0-9_]+$", "", cleaned)
+    if not cleaned:
+        cleaned = "selray"
+    return cleaned
 
 
 def create_networking(network_client: NetworkManagementClient, resource_group):
@@ -226,7 +240,7 @@ def create_selray_vm(resource_group, subscription_id="", credential=None):
     ensure_rg(resource_client, resource_group)
     owner = get_user()
 
-    vm_name = f"selray-{owner}-{randint(1_000_000, 9_999_999)}"
+    vm_name = sanitize_vm_name(f"selray-{owner}-{randint(1_000_000, 9_999_999)}")
 
     nic_id, nic_name, pip_id, _nsg_id, pip_name = create_networking(network_client, resource_group)
     create_vm(resource_group, compute_client, nic_id, owner=owner, vm_name=vm_name)
