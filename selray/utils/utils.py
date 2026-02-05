@@ -5,12 +5,10 @@ import pause
 import os
 import toml
 import importlib.resources
-from . import azure_proxy, update, attempt_login, create_selray_vm, delete_vm_by_name
+from . import update, attempt_login, create_selray_vm, delete_vm_by_name
 import subprocess
 from pathlib import Path
 from importlib import resources as importlib_resources
-
-from .credential_stuffing import assign_spray_identifier
 
 
 class Colors:
