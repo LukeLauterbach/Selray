@@ -43,7 +43,7 @@ class SelrayArgs:
     update: Union[bool, str] = False
 
     # Global Proxy Options
-    proxy_clean: bool = False
+    proxy_clean: Union[bool, str] = False
     proxy_list: bool = False
     num_sprays_per_ip: int = 5
 
@@ -141,8 +141,13 @@ def build_parser() -> ArgumentParser:
     )
 
     # Global proxies
-    proxy_group.add_argument("--proxy-clean", action="store_true",
-                             help="(OPTIONAL) Clean up created proxies instead of spraying.")
+    proxy_group.add_argument(
+        "--proxy-clean",
+        nargs="?",
+        const=True,
+        default=False,
+        help="(OPTIONAL) Clean up created proxies instead of spraying. Optionally provide a VM name to delete.",
+    )
     proxy_group.add_argument("--proxy-list", action="store_true",
                              help="(OPTIONAL) List created proxies.")
     proxy_group.add_argument(

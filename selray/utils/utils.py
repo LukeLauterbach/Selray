@@ -198,8 +198,15 @@ def prepare_proxies(ec2, args):
 
 
 def destroy_proxies(args):
-    from selray.utils import delete_selray_vms
-    if args.azure:
+    from selray.utils import delete_selray_vms, delete_vm_by_name, list_selray_vms
+    if isinstance(args.proxy_clean, str):
+        vms = list_selray_vms(print_output=False)
+        match = next((vm for vm in vms if vm.get("name") == args.proxy_clean), None)
+        if not match:
+            print(f"No VM found with name: {args.proxy_clean}")
+            return
+        delete_vm_by_name(match["resource_group"], match["name"])
+    else:
         delete_selray_vms()
 
 

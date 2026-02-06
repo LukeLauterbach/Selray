@@ -89,7 +89,8 @@ Selray can automatically spin up Azure proxies, rotating the proxy IP addresses 
 - **`-n {INTEGER}`** – Maximum spray attempts per IP (default: 5).
 - **`-t {INTEGER}`** – Number of concurrent threads/Azure instances (default: 5).
 - **`--proxy-list`** – List Azure instances created.
-- **`--proxy-clean`** – Destroy Azure instances created (will also be done automatically at the end of spraying).
+- **`--proxy-clean`** – Destroy Azure instances created by you (will also be done automatically at the end of spraying). This will not kill proxies made by other Azure accounts, even in the same Resource Group.
+- **`--proxy-clean {VM NAME}`** – Destroy a specific VM (which can be a VM created by another Azure group)
 - **`-arg {RESOURCE_GROUP}`** – Azure resource group to create proxies in (or set in en environment variable`AZURE_RG`).
 
 ## 📦 Installation
@@ -100,12 +101,12 @@ pipx install "git+https://github.com/LukeLauterbach/SeleniumSpray"
 
 Or manually:
 ```bash
+git clone https://github.com/LukeLauterbach/Selray
 pip install -r requirements.txt
 python selray/Selray.py
 ```
+The first time you run Selray with Azure proxies, the script will prompt you to log into your Azure account. 
 
-## 🐛 Issues
-* #14 - Certain Web Application Firewalls may block Selenium out of the box. 
 
 ## ⚠️ Disclaimer
 This tool is intended for authorized testing and educational purposes only.  
