@@ -28,7 +28,7 @@ def list_in_string(string_to_check="", list_to_compare=None):
 def main(spray_config, proxy_url):
     """
     Playwright-based version of attempt_login. Keeps the same return shape:
-    {'USERNAME': ..., 'PASSWORD': ..., 'RESULT': <"SUCCESS"|"INVALID"|"LOCKED"|"PASSWORDLESS"|"VALID USERNAME"|"INVALID USERNAME"|"ERROR">}
+    {'USERNAME': ..., 'PASSWORD': ..., 'RESULT': <"SUCCESS"|"INCORRECT"|"LOCKED"|"PASSWORDLESS"|"VALID USERNAME"|"INVALID USERNAME"|"ERROR">}
     """
 
     # Playwright setup
@@ -236,13 +236,13 @@ def main(spray_config, proxy_url):
                 if s.lower() in page_source:
                     result = "SUCCESS"
             if result != "SUCCESS":
-                result = "INVALID"
+                result = "INCORRECT"
 
         if spray_config.fail:
             for s in spray_config.fail:
                 if s.lower() in page_source:
-                    result = "INVALID"
-            if result != "INVALID":
+                    result = "INCORRECT"
+            if result != "INCORRECT":
                 result = "SUCCESS"
 
         context.close()
@@ -254,7 +254,7 @@ def main(spray_config, proxy_url):
         )
     else:
         print(
-            f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - INVALID: {spray_config.username} - {spray_config.password}"
+            f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - INCORRECT: {spray_config.username} - {spray_config.password}"
         )
 
     return {

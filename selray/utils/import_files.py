@@ -28,6 +28,9 @@ def process_file(filenames):
     if "," in filenames:
         filenames = filenames.split(",")
 
+    if isinstance(filenames, str):
+        return [filenames]
+
     for filename in filenames:
         if filename.endswith(".txt"):
             file_contents.extend(import_txt_file(filename))
