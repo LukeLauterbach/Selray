@@ -3,24 +3,20 @@ from multiprocessing import Process, Queue
 from . import utils
 import pause
 
-def main(args, proxies, spray_config):
+def main(args, spray_config):
     results = []
     password_id = 0
 
     while password_id < len(args.passwords):
         password = args.passwords[password_id]
         next_start_time = datetime.now() + timedelta(minutes=args.delay)
-        print(f"Beginning spray with password '{password}'")
+        if password:
+            print(f"Beginning spray with password '{password}'")
+        else:
+            print(f"Beginning user enumeration")
 
-        user_chunks = split_usernames(args.usernames, proxies)
-        queue = Queue()
-        processes = launch_spray_processes(spray_config, proxies, user_chunks, password, queue)
-
-        for p in processes:
-            p.join()
-
-        results.extend(collect_results(queue))
-
+        user_chunks = split_usernames(args)
+        results.extend(launch_spray_processes(spray_config, user_chunks, password))
         args.usernames = remove_locked_users(args.usernames, results)
 
         password_id += 1
@@ -45,19 +41,39 @@ def remove_locked_users(usernames, results):
     return usernames
 
 
-def split_usernames(usernames, proxies):
-    chunk_size = (len(usernames) + len(proxies) - 1) // len(proxies)
-    return [usernames[i:i + chunk_size] for i in range(0, len(usernames), chunk_size)]
+def split_usernames(args):
+    chunk_size = (len(args.usernames) + args.threads - 1) // args.threads
+    return [args.usernames[i:i + chunk_size] for i in range(0, len(args.usernames), chunk_size)]
 
 
-def launch_spray_processes(spray_config, proxies, user_chunks, password, queue):
+def launch_spray_processes(spray_config, user_chunks, password=None):
     processes = []
-    for proxy, user_chunk in zip(proxies, user_chunks):
-        credentials = [{'USERNAME': username, 'PASSWORD': password} for username in user_chunk]
-        p = Process(target=utils.perform_spray, args=(spray_config, credentials, proxy, queue))
+    queue = Queue()
+
+    for user_chunk in user_chunks:
+        credentials = []
+        for entry in user_chunk:
+            if isinstance(entry, dict):
+                username = entry.get("USERNAME") or entry.get("username")
+                entry_password = entry.get("PASSWORD") or entry.get("password")
+            else:
+                username = entry
+                entry_password = None
+
+            credentials.append(
+                {
+                    "USERNAME": username,
+                    "PASSWORD": password if password is not None else entry_password,
+                }
+            )
+        p = Process(target=utils.perform_spray, args=(spray_config, credentials, queue))
         p.start()
         processes.append(p)
-    return processes
+
+    for p in processes:
+        p.join()
+
+    return collect_results(queue)
 
 
 def collect_results(queue):

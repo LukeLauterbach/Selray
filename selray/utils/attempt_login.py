@@ -55,23 +55,36 @@ def main(spray_config, proxy_url):
         context = browser.new_context(ignore_https_errors=True)
         page = context.new_page()
 
-        # Try to load URL up to 3 times
+        # Try to load URL, allowing extra time for proxy connectivity
         nav_ok = False
-        for i in range(3):
+        max_proxy_wait_s = 10
+        started = datetime.now()
+        attempts = 0
+        while (datetime.now() - started).total_seconds() < max_proxy_wait_s:
+            attempts += 1
             try:
                 page.goto(spray_config.url, wait_until="load", timeout=15000)
                 nav_ok = True
                 break
             except TimeoutError:
-                if i == 2:
-                    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - ERROR - Could not load the URL: {spray_config.url}")
-                    context.close()
-                    browser.close()
-                    return {
-                        "USERNAME": spray_config.username,
-                        "PASSWORD": spray_config.password,
-                        "RESULT": "ERROR",
-                    }
+                # keep retrying until max_proxy_wait_s is reached
+                pass
+            except Error as e:
+                # Proxy can fail fast; give it a few seconds to come up.
+                if "ERR_PROXY_CONNECTION_FAILED" not in str(e):
+                    raise
+
+            sleep(1)
+
+        if not nav_ok:
+            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - ERROR - Could not load the URL: {spray_config.url}")
+            context.close()
+            browser.close()
+            return {
+                "USERNAME": spray_config.username,
+                "PASSWORD": spray_config.password,
+                "RESULT": "ERROR",
+            }
 
         # Execute Before Code
         if getattr(spray_config, "pre_login_code", None):

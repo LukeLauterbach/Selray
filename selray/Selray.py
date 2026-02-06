@@ -1,11 +1,13 @@
-from selray.utils import aws, utils, prepare_variables, spray,write_output_files
+from selray.utils import aws, utils, spray,write_output_files,Arguments
 from selray.utils.SprayConfig import SprayConfig
+from selray.utils.Azure import get_azure_context
+
 
 # --------------------------------- #
 # GLOBAL VARIABLES                  #
 # --------------------------------- #
 
-__version__ = "0.7"
+__version__ = "1.0"
 
 
 # --------------------------------- #
@@ -15,31 +17,29 @@ __version__ = "0.7"
 def main():
     results = []
     utils.initialize_playwright()
-    args = utils.parse_arguments()
+    args = Arguments.parse_args()  # The contents of args is documented in Arguments.py
 
     # Prepare spray configuration
-    args = prepare_variables.main(args)
+    args = Arguments.prepare_args(args)
     spray_config = SprayConfig.from_args(args)
 
-    # Connect to AWS, if using proxies
-    ec2 = aws.get_ec2_session(args.aws_region, args.aws_access_key, args.aws_secret_key, args.aws_session_token)
+    if args.azure:
+        args.azure_credentials, args.azure_subscription_id = get_azure_context()
 
     # Certain modes don't require running the whole script. Check to see if one of those should be executed.
-    utils.alternate_modes(args, ec2)
+    utils.alternate_modes(args)
 
     utils.print_beginning(args, version=__version__)
-
-    proxies = utils.prepare_proxies(ec2, args)
 
     try:
         # Perform credential stuffing, if that's what's in store:
         if (not args.passwords or args.passwords == ['']) and ":" in args.usernames[0]:
-            results = utils.credential_stuffing(spray_config, args, proxies)
+            results = utils.credential_stuffing(spray_config, args)
         else:
-            results = spray.main(args, proxies, spray_config)
+            results = spray.main(args, spray_config)
 
     finally:
-        utils.destroy_proxies(args, ec2)
+        utils.destroy_proxies(args)
         utils.print_ending(results)
         write_output_files.main(args, results)
 
