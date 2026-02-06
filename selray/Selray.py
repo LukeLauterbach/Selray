@@ -1,6 +1,7 @@
 from selray.utils import aws, utils, spray,write_output_files,Arguments
 from selray.utils.SprayConfig import SprayConfig
 from selray.utils.Azure import get_azure_context
+from selray.utils.credential_stuffing import perform_stuffing
 
 
 # --------------------------------- #
@@ -34,7 +35,7 @@ def main():
     try:
         # Perform credential stuffing, if that's what's in store:
         if (not args.passwords or args.passwords == ['']) and ":" in args.usernames[0]:
-            results = utils.credential_stuffing(spray_config, args)
+            results = perform_stuffing(spray_config, args)
         else:
             results = spray.main(args, spray_config)
 

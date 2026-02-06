@@ -1,9 +1,8 @@
 import sys
-from . import aws, rotate_ip_if_needed
-from datetime import datetime, timedelta
-import pause
+from . import rotate_ip_if_needed
+from datetime import datetime
 import os
-import toml
+import tomllib
 import importlib.resources
 from . import update, attempt_login, create_selray_vm, delete_vm_by_name
 import subprocess
@@ -44,12 +43,12 @@ def load_mode_config(args, mode_dir='selray/modes'):
     Loads mode configuration from a TOML file into the args namespace if not already specified.
     """
     try:
-        with importlib.resources.files("selray.modes").joinpath(f"{args.mode.lower()}.toml").open("r") as f:
-            config = toml.load(f)
+        with importlib.resources.files("selray.modes").joinpath(f"{args.mode.lower()}.toml").open("rb") as f:
+            config = tomllib.load(f)
     except FileNotFoundError:
         config_path = os.path.join(mode_dir, f"{args.mode.lower()}.toml")
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = toml.load(f)
+        with open(config_path, 'rb') as f:
+            config = tomllib.load(f)
 
     for key, value in config.items():
         if not getattr(args, key, None):
@@ -134,26 +133,6 @@ def print_ending(results):
         print("No valid credentials found.")
 
 
-def import_txt_file(filename):
-    data = []
-    with open(filename, "r", encoding='utf-8', errors='ignore') as file:
-        for line in file:
-            data.append(line.rstrip())
-    return data
-
-
-def process_file(filename):
-    if not filename:
-        return False
-    if filename.endswith(".txt"):
-        return import_txt_file(filename)
-    elif filename.endswith(".csv"):
-        print("ERROR - CSVs are currently not supported.")
-        sys.exit()
-    else:
-        return [filename]  # If it isn't a file, just return the value
-
-
 def prepare_success_fail(success="", fail=""):
     if success:
         success = success.split(",")
@@ -163,38 +142,6 @@ def prepare_success_fail(success="", fail=""):
         success = []
 
     return fail, success
-
-
-def prepare_proxies(ec2, args):
-    proxies = []
-    if args.proxies:
-        manual_proxies = process_file(args.proxies)
-        if not manual_proxies:
-            manual_proxies = args.proxies.split(",")
-
-        for manual_proxy in manual_proxies:
-            proxies.append({"type": "MANUAL", "ip": "", "id": None, "url": manual_proxy})
-
-    threads_needed = args.threads
-    threads_needed -= len(proxies)
-
-    if args.azure:
-        if threads_needed >= 6:
-            azure_threads = 3
-        elif args.aws:
-            azure_threads = int(threads_needed / 2)
-        else:
-            azure_threads = threads_needed
-        threads_needed -= azure_threads
-        proxies.extend(azure_proxy.create_proxies(azure_threads))
-
-    if args.aws:
-         proxies.extend(aws.proxy_setup(ec2, threads_needed))
-
-    if not proxies:
-        proxies = [{"type": None, "ip": None, "id": None, "url": None} for _ in range(args.threads)]
-
-    return proxies  # Proxies will always be a list of dicts.
 
 
 def destroy_proxies(args):
@@ -299,43 +246,6 @@ def perform_spray(spray_config, credentials, queue):
     queue.put(results)
     delete_vm_by_name(spray_config.azure_resource_group, vm_name)
 
-
-def credential_stuffing(spray_config, args):
-    from . import credential_stuffing
-    from .spray import launch_spray_processes
-    results = []
-
-    credentials = credential_stuffing.split_username_password(args.usernames)
-    credentials = credential_stuffing.assign_spray_identifier(credentials)
-
-    stuffing_attempt = 1
-    num_stuffing_attempts = max(d['ATTEMPT'] for d in credentials)
-
-    while stuffing_attempt <= num_stuffing_attempts:
-        next_start_time = datetime.now() + timedelta(minutes=args.delay)  # Check when the next spray should run
-        print(f"Beginning stuffing attempt {stuffing_attempt} of {num_stuffing_attempts}.")
-
-        user_chunks = credential_stuffing.split_users_into_chunks(credentials, stuffing_attempt, args.threads)
-        results.extend(launch_spray_processes(spray_config, user_chunks))
-
-        # Check to see if the process is at the end. If not, wait the specified time.
-        if stuffing_attempt < num_stuffing_attempts:
-            print(f"Stuffing attempt {stuffing_attempt} of {num_stuffing_attempts} complete. Waiting until "
-                  f"{next_start_time.strftime('%H:%M')} to start next stuffing attempt.")
-            if any(entry['RESULT'] == 'SUCCESS' for entry in results):
-                print("Valid Credentials Found:")
-                for entry in results:
-                    if entry['RESULT'] == 'SUCCESS':
-                        print(f"{entry['USERNAME']} - {entry['PASSWORD']}")
-                print()
-            pause.until(next_start_time)
-
-        else:
-            print(
-                f"Spray of password {stuffing_attempt} of {num_stuffing_attempts} complete. All passwords complete.")
-        stuffing_attempt += 1
-
-    return results
 
 def initialize_playwright():
     patchright_cmd = Path(sys.executable).parent / "patchright"
