@@ -6,6 +6,7 @@ from argparse import ArgumentParser, Namespace
 from json import dumps
 from dataclasses import asdict
 from . import utils
+from .import_files import process_file
 
 
 @dataclass
@@ -184,8 +185,8 @@ def prepare_args(args):
         utils.load_mode_config(args)
 
     args.fail, args.success = utils.prepare_success_fail(fail=args.fail, success=args.success)
-    args.usernames = utils.process_file(args.usernames)
-    args.passwords = utils.process_file(args.passwords) if args.passwords else [""]
+    args.usernames = process_file(args.usernames)
+    args.passwords = process_file(args.passwords) if args.passwords else [""]
     args.usernames = utils.prepare_usernames(args.usernames, args.domain, args.domain_after, args.domain_backslash)
     args.url = utils.prepare_url(args.url)
     args.invalid_username = utils.prepare_invalid_username(invalid_username=args.invalid_username)
