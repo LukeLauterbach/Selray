@@ -38,17 +38,31 @@ def _az_installed() -> bool:
     return _find_az_executable() is not None
 
 
-def _with_sudo(cmd: list[str]) -> list[str]:
+def _needs_sudo() -> bool:
     if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() != 0:
-        if shutil.which("sudo"):
-            return ["sudo"] + cmd
+        return shutil.which("sudo") is not None
+    return False
+
+
+def _with_sudo(cmd: list[str]) -> list[str]:
+    if _needs_sudo():
+        return ["sudo"] + cmd
     return cmd
 
 
-def _run_install_command(cmd: list[str]) -> bool:
+def _run_install_command(cmd: list[str], *, label: str) -> bool:
     try:
-        return subprocess.run(cmd).returncode == 0
-    except Exception:
+        cp = subprocess.run(cmd, capture_output=True, text=True)
+        if cp.returncode == 0:
+            return True
+        print(f"[!] Azure CLI install step failed: {label}")
+        if cp.stdout:
+            print(cp.stdout.strip())
+        if cp.stderr:
+            print(cp.stderr.strip())
+        return False
+    except Exception as e:
+        print(f"[!] Azure CLI install step error: {label}: {e}")
         return False
 
 
@@ -58,31 +72,62 @@ def _attempt_install_az() -> bool:
             return _run_install_command(
                 ["winget", "install", "-e", "--id", "Microsoft.AzureCLI",
                  "--accept-source-agreements", "--accept-package-agreements"]
+                , label="winget install Microsoft.AzureCLI"
             )
         if shutil.which("choco"):
-            return _run_install_command(["choco", "install", "azure-cli", "-y"])
+            return _run_install_command(
+                ["choco", "install", "azure-cli", "-y"],
+                label="choco install azure-cli",
+            )
         if shutil.which("scoop"):
-            return _run_install_command(["scoop", "install", "azure-cli"])
+            return _run_install_command(
+                ["scoop", "install", "azure-cli"],
+                label="scoop install azure-cli",
+            )
         return False
 
     if sys.platform == "darwin":
         if shutil.which("brew"):
-            return _run_install_command(["brew", "install", "azure-cli"])
+            return _run_install_command(
+                ["brew", "install", "azure-cli"],
+                label="brew install azure-cli",
+            )
         return False
 
     if shutil.which("apt-get"):
-        _run_install_command(_with_sudo(["apt-get", "update"]))
-        return _run_install_command(_with_sudo(["apt-get", "install", "-y", "azure-cli"]))
+        _run_install_command(_with_sudo(["apt-get", "update"]), label="apt-get update")
+        if _run_install_command(
+            _with_sudo(["apt-get", "install", "-y", "azure-cli"]),
+            label="apt-get install azure-cli",
+        ):
+            return True
+        if shutil.which("curl"):
+            sudo_prefix = "sudo " if _needs_sudo() else ""
+            return _run_install_command(
+                ["bash", "-c", f"curl -sL https://aka.ms/InstallAzureCLIDeb | {sudo_prefix}bash"],
+                label="curl https://aka.ms/InstallAzureCLIDeb | bash",
+            )
+        return False
     if shutil.which("dnf"):
-        return _run_install_command(_with_sudo(["dnf", "install", "-y", "azure-cli"]))
+        return _run_install_command(
+            _with_sudo(["dnf", "install", "-y", "azure-cli"]),
+            label="dnf install azure-cli",
+        )
     if shutil.which("yum"):
-        return _run_install_command(_with_sudo(["yum", "install", "-y", "azure-cli"]))
+        return _run_install_command(
+            _with_sudo(["yum", "install", "-y", "azure-cli"]),
+            label="yum install azure-cli",
+        )
     if shutil.which("zypper"):
         return _run_install_command(
-            _with_sudo(["zypper", "--non-interactive", "install", "azure-cli"])
+            _with_sudo(["zypper", "--non-interactive", "install", "azure-cli"]),
+            label="zypper install azure-cli",
         )
     if shutil.which("pacman"):
-        return _run_install_command(_with_sudo(["pacman", "-S", "--noconfirm", "azure-cli"]))
+        return _run_install_command(
+            _with_sudo(["pacman", "-S", "--noconfirm", "azure-cli"]),
+            label="pacman -S azure-cli",
+        )
     return False
 
 
