@@ -2,6 +2,7 @@ import os
 import json
 import shutil
 import subprocess
+import sys
 from typing import Optional, Tuple
 from azure.identity import AzureCliCredential, InteractiveBrowserCredential
 from azure.mgmt.resource import ResourceManagementClient
@@ -37,6 +38,73 @@ def _az_installed() -> bool:
     return _find_az_executable() is not None
 
 
+def _with_sudo(cmd: list[str]) -> list[str]:
+    if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() != 0:
+        if shutil.which("sudo"):
+            return ["sudo"] + cmd
+    return cmd
+
+
+def _run_install_command(cmd: list[str]) -> bool:
+    try:
+        return subprocess.run(cmd).returncode == 0
+    except Exception:
+        return False
+
+
+def _attempt_install_az() -> bool:
+    if os.name == "nt":
+        if shutil.which("winget"):
+            return _run_install_command(
+                ["winget", "install", "-e", "--id", "Microsoft.AzureCLI",
+                 "--accept-source-agreements", "--accept-package-agreements"]
+            )
+        if shutil.which("choco"):
+            return _run_install_command(["choco", "install", "azure-cli", "-y"])
+        if shutil.which("scoop"):
+            return _run_install_command(["scoop", "install", "azure-cli"])
+        return False
+
+    if sys.platform == "darwin":
+        if shutil.which("brew"):
+            return _run_install_command(["brew", "install", "azure-cli"])
+        return False
+
+    if shutil.which("apt-get"):
+        _run_install_command(_with_sudo(["apt-get", "update"]))
+        return _run_install_command(_with_sudo(["apt-get", "install", "-y", "azure-cli"]))
+    if shutil.which("dnf"):
+        return _run_install_command(_with_sudo(["dnf", "install", "-y", "azure-cli"]))
+    if shutil.which("yum"):
+        return _run_install_command(_with_sudo(["yum", "install", "-y", "azure-cli"]))
+    if shutil.which("zypper"):
+        return _run_install_command(
+            _with_sudo(["zypper", "--non-interactive", "install", "azure-cli"])
+        )
+    if shutil.which("pacman"):
+        return _run_install_command(_with_sudo(["pacman", "-S", "--noconfirm", "azure-cli"]))
+    return False
+
+
+def ensure_az_cli_installed(*, auto_install: bool = True) -> bool:
+    if _az_installed():
+        return True
+    if not auto_install:
+        return False
+
+    print("[!] Azure CLI not found. Attempting to install...")
+    if not _attempt_install_az():
+        print("[!] Azure CLI auto-install failed. Please install manually:")
+        print("    https://learn.microsoft.com/cli/azure/install-azure-cli")
+        return False
+
+    if _find_az_executable():
+        return True
+
+    print("[!] Azure CLI installed but not on PATH. Restart your shell or add it to PATH.")
+    return False
+
+
 def make_azure_clients(subscription_id: str):
     cred, subscription_id = get_azure_context()  # your CLI->browser fallback
     return (
@@ -54,6 +122,9 @@ def _run_az(cmd: list[str], *, interactive: bool = False) -> subprocess.Complete
     - interactive=True: attach to terminal (required for 'az login' device-code / browser flows)
     """
     az_path = _find_az_executable()
+    if not az_path:
+        if ensure_az_cli_installed(auto_install=True):
+            az_path = _find_az_executable()
     if not az_path:
         raise FileNotFoundError("Azure CLI (az) not found for this Python process.")
 
@@ -89,7 +160,7 @@ def ensure_az_cli_login(*, use_device_code: bool = True) -> None:
     Ensures Azure CLI can acquire an ARM token (what AzureCliCredential needs).
     If not, runs an interactive az login with ARM scope.
     """
-    if not _az_installed():
+    if not ensure_az_cli_installed(auto_install=True):
         raise RuntimeError("Azure CLI is not installed or not on PATH (cannot run 'az login').")
 
     if _az_can_get_arm_token():
