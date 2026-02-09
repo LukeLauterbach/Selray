@@ -94,20 +94,18 @@ def _attempt_install_az() -> bool:
             )
         return False
 
+    if shutil.which("curl"):
+        sudo_prefix = "sudo " if _needs_sudo() else ""
+        return _run_install_command(
+            ["bash", "-c", f"curl -sL https://aka.ms/InstallAzureCLIDeb | {sudo_prefix}bash"],
+            label="curl https://aka.ms/InstallAzureCLIDeb | bash",
+        )
     if shutil.which("apt-get"):
         _run_install_command(_with_sudo(["apt-get", "update"]), label="apt-get update")
-        if _run_install_command(
+        return _run_install_command(
             _with_sudo(["apt-get", "install", "-y", "azure-cli"]),
             label="apt-get install azure-cli",
-        ):
-            return True
-        if shutil.which("curl"):
-            sudo_prefix = "sudo " if _needs_sudo() else ""
-            return _run_install_command(
-                ["bash", "-c", f"curl -sL https://aka.ms/InstallAzureCLIDeb | {sudo_prefix}bash"],
-                label="curl https://aka.ms/InstallAzureCLIDeb | bash",
-            )
-        return False
+        )
     if shutil.which("dnf"):
         return _run_install_command(
             _with_sudo(["dnf", "install", "-y", "azure-cli"]),
