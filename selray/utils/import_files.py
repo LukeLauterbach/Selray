@@ -27,15 +27,20 @@ def process_file(filenames):
 
     if "," in filenames:
         filenames = filenames.split(",")
+        for filename in filenames:
+            file_contents.extend(parse_filename(filename))
+    else:
+        file_contents = parse_filename(filenames)
 
-    if isinstance(filenames, str):
-        return [filenames]
-
-    for filename in filenames:
-        if filename.endswith(".txt"):
-            file_contents.extend(import_txt_file(filename))
-        elif filename.endswith(".csv"):
-            file_contents.extend(import_csv_file(filename))
-        else:
-            file_contents.extend(filename)
     return file_contents  # If it isn't a file, just return the value
+
+def parse_filename(filename):
+    file_contents = []
+    if filename.endswith(".txt"):
+        file_contents.extend(import_txt_file(filename))
+    elif filename.endswith(".csv"):
+        file_contents.extend(import_csv_file(filename))
+    else:
+        file_contents.extend(filename)
+
+    return file_contents
