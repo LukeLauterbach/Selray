@@ -1,4 +1,4 @@
-url = "https://login.microsoftonline.com"
+url = "https://office.com/login"
 username_field = 'type="email"'
 password_field = 'type="password"'
 fail = "Your account or password is incorrect,That password is incorrect"
