@@ -71,7 +71,7 @@ def main(spray_config, proxy_url):
                 pass
             except Error as e:
                 # Proxy can fail fast; give it a few seconds to come up.
-                if "ERR_PROXY_CONNECTION_FAILED" not in str(e):
+                if "ERR_PROXY_CONNECTION_FAILED" not in str(e) and "ERR_CONNECTION_RESET" not in str(e):
                     raise
 
             sleep(1)
