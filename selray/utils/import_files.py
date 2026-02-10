@@ -35,12 +35,11 @@ def process_file(filenames):
     return file_contents  # If it isn't a file, just return the value
 
 def parse_filename(filename):
-    file_contents = []
     if filename.endswith(".txt"):
-        file_contents.extend(import_txt_file(filename))
+        file_contents = import_txt_file(filename)
     elif filename.endswith(".csv"):
-        file_contents.extend(import_csv_file(filename))
+        file_contents = import_csv_file(filename)
     else:
-        file_contents.extend(filename)
+        file_contents = [filename]
 
     return file_contents
