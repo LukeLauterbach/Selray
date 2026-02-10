@@ -24,6 +24,16 @@ def _find_az_executable() -> Optional[str]:
     if az:
         return az
 
+    if os.name != "nt":
+        candidates = [
+            "/usr/bin/az",
+            "/usr/local/bin/az",
+            "/opt/az/bin/az",
+        ]
+        for path in candidates:
+            if os.path.isfile(path) and os.access(path, os.X_OK):
+                return path
+
     if os.name == "nt":
         try:
             cp = subprocess.run(["where.exe", "az"], capture_output=True, text=True)
@@ -320,6 +330,9 @@ def get_credential_prefer_cli(*, prompt_cli_login: bool = True) -> object:
     Prefer Azure CLI credential. If CLI isn't ready, optionally run az login,
     then retry. Fall back to InteractiveBrowserCredential if CLI is unavailable.
     """
+    if not _az_installed():
+        ensure_az_cli_installed(auto_install=True)
+
     if _az_installed():
         try:
             cli = AzureCliCredential()
