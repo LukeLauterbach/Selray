@@ -3,6 +3,7 @@ import json
 import shutil
 import subprocess
 import sys
+import platform
 from typing import Optional, Tuple
 from azure.identity import AzureCliCredential, InteractiveBrowserCredential
 from azure.mgmt.resource import ResourceManagementClient
@@ -95,6 +96,16 @@ def _attempt_install_az() -> bool:
         return False
 
     if shutil.which("curl"):
+        dist_id = ""
+        try:
+            dist_id = (platform.freedesktop_os_release().get("ID") or "").lower()
+        except Exception:
+            dist_id = ""
+        if dist_id == "kali":
+            return _run_install_command(
+                ["bash", "-c", "curl -sL https://aka.ms/InstallAzureCLIDeb | sudo DIST_CODE=bookworm bash"],
+                label="curl https://aka.ms/InstallAzureCLIDeb | sudo DIST_CODE=bookworm bash",
+            )
         sudo_prefix = "sudo " if _needs_sudo() else ""
         return _run_install_command(
             ["bash", "-c", f"curl -sL https://aka.ms/InstallAzureCLIDeb | {sudo_prefix}bash"],
