@@ -21,6 +21,7 @@ def import_csv_file(filename):
 
 
 def process_file(filenames):
+    print(filenames)
     file_contents = []
     if not filenames:
         return False
@@ -31,7 +32,7 @@ def process_file(filenames):
             file_contents.extend(parse_filename(filename))
     else:
         file_contents = parse_filename(filenames)
-
+    print(file_contents)
     return file_contents  # If it isn't a file, just return the value
 
 def parse_filename(filename):
