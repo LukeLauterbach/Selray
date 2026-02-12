@@ -1,0 +1,30 @@
+url = "https://login.microsoftonline.us"
+username_field = 'type="email"'
+password_field = 'type="password"'
+fail = "Your account or password is incorrect,That password is incorrect"
+invalid_username = "We couldn't find an account with that username,Enter a valid email address"
+num_sprays_per_ip = 10
+lockout = "password too many times"
+passwordless = "Open your Authenticator app,Get a code to sign in, Sign in with a passkey,Your device will open a security window"
+pre_password_code = '''
+from patchright._impl._errors import TimeoutError
+from time import sleep
+
+# Case 1: Work or school account tile
+work_box = page.locator("#aadTile")
+try:
+    work_box.wait_for(state="visible", timeout=3000)
+    work_box.click()
+    sleep(1)
+except TimeoutError:
+    pass
+
+# Case 2: "Use your password" button
+try:
+    button = page.get_by_role("button", name="Use your password")
+    button.wait_for(state="visible", timeout=3000)
+    button.click()
+    sleep(1)
+except TimeoutError:
+    pass
+'''
