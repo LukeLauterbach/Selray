@@ -1,7 +1,10 @@
 from datetime import datetime, timedelta
 from multiprocessing import Process, Queue
+from queue import Empty
 from . import utils
 import pause
+from rich.progress import Progress
+from rich.text import Text
 
 def main(args, spray_config):
     results = []
@@ -49,6 +52,7 @@ def split_usernames(args):
 def launch_spray_processes(spray_config, user_chunks, password=None):
     processes = []
     queue = Queue()
+    total_credentials = 0
 
     for user_chunk in user_chunks:
         credentials = []
@@ -66,20 +70,63 @@ def launch_spray_processes(spray_config, user_chunks, password=None):
                     "PASSWORD": password if password is not None else entry_password,
                 }
             )
+        total_credentials += len(credentials)
         p = Process(target=utils.perform_spray, args=(spray_config, credentials, queue))
         p.start()
         processes.append(p)
 
+    return collect_results(queue, processes, total_credentials)
+
+
+def collect_results(queue, processes, total_credentials):
+    results = []
+    expected_result_batches = len(processes)
+    received_result_batches = 0
+
+    with Progress() as progress:
+        task = progress.add_task("Spraying", total=total_credentials)
+
+        while received_result_batches < expected_result_batches:
+            try:
+                message = queue.get(timeout=0.1)
+            except Empty:
+                if not any(p.is_alive() for p in processes):
+                    break
+                continue
+
+            if isinstance(message, dict):
+                message_type = message.get("type")
+                if message_type == "progress":
+                    progress.advance(task, message.get("count", 1))
+                elif message_type == "log":
+                    text = message.get("text")
+                    if text:
+                        progress.console.print(Text.from_ansi(text))
+                elif message_type == "results":
+                    batch = message.get("data") or []
+                    results.extend(batch)
+                    received_result_batches += 1
+            elif isinstance(message, list):
+                # Backward compatibility for older worker payloads.
+                results.extend(message)
+                received_result_batches += 1
+                progress.advance(task, len(message))
+
     for p in processes:
         p.join()
 
-    return collect_results(queue)
-
-
-def collect_results(queue):
-    results = []
+    # Drain any remaining messages that may have arrived after loop exit.
     while not queue.empty():
-        results.extend(queue.get())
+        message = queue.get()
+        if isinstance(message, dict) and message.get("type") == "log":
+            text = message.get("text")
+            if text:
+                print(text)
+        if isinstance(message, dict) and message.get("type") == "results":
+            results.extend(message.get("data") or [])
+        elif isinstance(message, list):
+            results.extend(message)
+
     return results
 
 

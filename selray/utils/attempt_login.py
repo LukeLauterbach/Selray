@@ -77,7 +77,7 @@ def main(spray_config, proxy_url):
             sleep(1)
 
         if not nav_ok:
-            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - ERROR - Could not load the URL: {spray_config.url}")
+            # print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - ERROR - Could not load the URL: {spray_config.url}")
             context.close()
             browser.close()
             return {

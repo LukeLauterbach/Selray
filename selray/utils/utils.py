@@ -2,12 +2,16 @@ import sys
 from . import rotate_ip_if_needed
 from datetime import datetime
 import os
+import io
 import tomllib
 import importlib.resources
 from . import update, attempt_login, create_selray_vm, delete_vm_by_name
 import subprocess
 from pathlib import Path
 from importlib import resources as importlib_resources
+from contextlib import redirect_stdout, redirect_stderr
+from rich.console import Console
+from rich.panel import Panel
 
 
 class Colors:
@@ -20,6 +24,27 @@ class Colors:
     END = '\033[0m'
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
+
+
+class _QueueLogStream(io.TextIOBase):
+    def __init__(self, queue):
+        self.queue = queue
+        self._buffer = ""
+
+    def write(self, s):
+        if not s:
+            return 0
+        self._buffer += s
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            if line:
+                self.queue.put({"type": "log", "text": line})
+        return len(s)
+
+    def flush(self):
+        if self._buffer:
+            self.queue.put({"type": "log", "text": self._buffer})
+            self._buffer = ""
 
 
 def alternate_modes(args):
@@ -173,9 +198,17 @@ def print_beginning(args, version=None):
     else:
         spray_duration = "{:02d} {:02d}:{:02d}".format(days, hours, minutes)
 
-    print(f"{Colors.HEADER}{Colors.BOLD}Selray{Colors.END}")
-    print(f"Author:  Luke Lauterbach (Sentinel Technologies)")
-    print(f"Version: {version}\n")
+    Console().print(
+        Panel.fit(
+            f"[bold cyan]SELRAY[/]\n[dim]Author:  Luke Lauterbach (Sentinel Technologies)\nVersion: {version}[/dim]",
+            border_style="cyan",
+            padding=(0, 2),
+        )
+    )
+
+    if not args.verbose:
+        print("")
+        return
 
     print(f"{'Username Count:':<28}{len(args.usernames)}")
     print(f"{'Password Count:':<28}{len(args.passwords)}")
@@ -195,56 +228,61 @@ def print_beginning(args, version=None):
     print(f"{'Invalid Username Condition:':<28}{args.invalid_username}")
     print(f"{'Lockout Condition:':<28}{args.lockout}")
     print(f"{'Threads:':<28}{args.threads}")
-    print(f"{'Delay:':<28}{args.delay}\n")
+    print(f"{'Delay:':<28}{args.delay}")
 
 
 def perform_spray(spray_config, credentials, queue):
     results = []
     vm_url = ""
     spray_num_with_current_ip = 0
-    if spray_config.azure:
-        vm_name, vm_url, vm_ip, nic_name, credential, network_client, compute_client, owner = create_selray_vm(spray_config.azure_resource_group)
-    for credential in credentials:
-        spray_config.username = credential['USERNAME']
-        spray_config.password = credential['PASSWORD']
+    log_stream = _QueueLogStream(queue)
 
-        # `attempt_login` returns a dictionary with:
-        #   - USERNAME
-        #   - PASSWORD
-        #   - RESULT: one of ["INVALID USERNAME", "LOCKED", "PASSWORDLESS", "VALID USERNAME", "ERROR", "SUCCESS", "FAILURE"]
-        result = attempt_login.main(spray_config, vm_url)
-
+    with redirect_stdout(log_stream), redirect_stderr(log_stream):
         if spray_config.azure:
-            # If an error was returned, force a proxy IP change
-            if result.get("RESULT") == "ERROR":
-                spray_num_with_current_ip = 10000
+            vm_name, vm_url, vm_ip, nic_name, credential, network_client, compute_client, owner = create_selray_vm(spray_config.azure_resource_group)
+        for credential in credentials:
+            spray_config.username = credential['USERNAME']
+            spray_config.password = credential['PASSWORD']
 
-            # Force rotate on navigation/proxy errors to recover quickly.
-            spray_num_with_current_ip, new_ip, new_url, _ = rotate_ip_if_needed(
-                spray_config.azure_resource_group,
-                vm_name,
-                spray_config.num_sprays_per_ip,
-                spray_num_with_current_ip,
-                network_client,
-                compute_client,
-                nic_name,
-                spray_config.azure_location,
-            )
+            # `attempt_login` returns a dictionary with:
+            #   - USERNAME
+            #   - PASSWORD
+            #   - RESULT: one of ["INVALID USERNAME", "LOCKED", "PASSWORDLESS", "VALID USERNAME", "ERROR", "SUCCESS", "FAILURE"]
+            result = attempt_login.main(spray_config, vm_url)
 
-            # rotate_ip_if_needed can return null urls and ips, so this just ensures we don't set them to null
-            if new_url:
-                vm_url = new_url
-            if new_ip:
-                vm_ip = new_ip
+            if spray_config.azure:
+                # If an error was returned, force a proxy IP change
+                if result.get("RESULT") == "ERROR":
+                    spray_num_with_current_ip = 10000
 
-            # If an error was encountered, try to log in again
-            if result.get("RESULT") == "ERROR":
-                result = attempt_login.main(spray_config, vm_url)
+                # Force rotate on navigation/proxy errors to recover quickly.
+                spray_num_with_current_ip, new_ip, new_url, _ = rotate_ip_if_needed(
+                    spray_config.azure_resource_group,
+                    vm_name,
+                    spray_config.num_sprays_per_ip,
+                    spray_num_with_current_ip,
+                    network_client,
+                    compute_client,
+                    nic_name,
+                    spray_config.azure_location,
+                )
 
-        results.append(result)
+                # rotate_ip_if_needed can return null urls and ips, so this just ensures we don't set them to null
+                if new_url:
+                    vm_url = new_url
+                if new_ip:
+                    vm_ip = new_ip
 
-    queue.put(results)
-    delete_vm_by_name(spray_config.azure_resource_group, vm_name)
+                # If an error was encountered, try to log in again
+                if result.get("RESULT") == "ERROR":
+                    result = attempt_login.main(spray_config, vm_url)
+
+            results.append(result)
+            queue.put({"type": "progress", "count": 1})
+
+        queue.put({"type": "results", "data": results})
+        if spray_config.azure:
+            delete_vm_by_name(spray_config.azure_resource_group, vm_name)
 
 
 def initialize_playwright():

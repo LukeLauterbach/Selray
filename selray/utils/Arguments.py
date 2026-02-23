@@ -39,6 +39,7 @@ class SelrayArgs:
     checkbox: Optional[str] = None
     file_prefix: str = ""
     list_modes: bool = False
+    verbose: bool = False
 
     # False -> not used, True -> used without arg, "branch" -> used with arg
     update: Union[bool, str] = False
@@ -140,6 +141,8 @@ def build_parser() -> ArgumentParser:
         nargs="?", const=True, default=False,
         help="(OPTIONAL) Update tool (pipx only). Optionally specify branch: --update BRANCH"
     )
+    optional.add_argument("-v", "--verbose", action="store_true", default=False,
+                          help="(OPTIONAL) Verbose mode. Default is False.")
 
     # Global proxies
     proxy_group.add_argument(
