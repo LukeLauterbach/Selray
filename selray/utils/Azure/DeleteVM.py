@@ -91,7 +91,6 @@ def discover_vm_attached_resources(
 def delete_vm_by_name(
     resource_group,
     vm_name,
-    subscription_id = "",
     *,
     credential=None,
     compute_client: Optional[ComputeManagementClient] = None,
@@ -243,6 +242,9 @@ def delete_vms_by_tags(
 
         rg = _resource_group_from_id(vm_id)
         matched.append((vm_id, vm_name, rg))
+
+    if not matched:
+        return []
 
     matched_vm_ids = [vm_id for vm_id, _, _ in matched]
     with tqdm(total=len(matched), desc="Deleting", dynamic_ncols=True) as bar:
