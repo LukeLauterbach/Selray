@@ -177,6 +177,10 @@ def print_beginning(args, version=None):
     print(f"Author:  Luke Lauterbach (Sentinel Technologies)")
     print(f"Version: {version}\n")
 
+    if not args.verbose:
+        print("\n")
+        return
+
     print(f"{'Username Count:':<28}{len(args.usernames)}")
     print(f"{'Password Count:':<28}{len(args.passwords)}")
     print(f"{'Total Login Attempts:':<28}{(len(args.usernames) * len(args.passwords))}")

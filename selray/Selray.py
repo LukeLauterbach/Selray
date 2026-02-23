@@ -8,7 +8,7 @@ from selray.utils.credential_stuffing import perform_stuffing
 # GLOBAL VARIABLES                  #
 # --------------------------------- #
 
-__version__ = "1.0"
+__version__ = "1.1"
 
 
 # --------------------------------- #
