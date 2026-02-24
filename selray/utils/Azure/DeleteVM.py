@@ -93,6 +93,7 @@ def delete_vm_by_name(
     vm_name,
     *,
     credential=None,
+    subscription_id=None,
     compute_client: Optional[ComputeManagementClient] = None,
     network_client: Optional[NetworkManagementClient] = None,
     delete_nics: bool = True,
