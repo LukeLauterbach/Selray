@@ -223,7 +223,7 @@ def delete_vms_by_tags(
     compute_client=None,
     network_client=None,
     include_data_disks: bool = True,
-    max_workers: int = 6,
+    max_workers: int = 10,
 ) -> List[str]:
     """
     Deletes all VMs that have ALL key/value pairs in `required_tags`.
