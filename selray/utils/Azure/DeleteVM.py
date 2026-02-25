@@ -16,6 +16,7 @@ class VmAttachedResources:
     nic_names: List[str]
     public_ip_names: List[str]
     nsg_names: List[str]
+    vnet_names: List[str]
     disk_names: List[str]  # includes OS disk (and optionally data disks)
 
 
@@ -44,6 +45,7 @@ def discover_vm_attached_resources(
     """
     Discovers NIC(s), Public IP(s) attached to those NIC(s),
     network security group(s) attached to those NIC(s),
+    virtual network(s) referenced by NIC subnet(s),
     and managed disk(s) attached to the VM (OS disk + optionally data disks).
     """
     vm = compute_client.virtual_machines.get(resource_group, vm_name)
@@ -51,6 +53,7 @@ def discover_vm_attached_resources(
     nic_names: List[str] = []
     pip_names: List[str] = []
     nsg_names: List[str] = []
+    vnet_names: List[str] = []
     disk_names: List[str] = []
 
     # NICs + PIPs
@@ -74,6 +77,17 @@ def discover_vm_attached_resources(
             if pip_id:
                 pip_names.append(_parse_name_from_resource_id(pip_id))
 
+            # Subnet ID looks like:
+            # .../virtualNetworks/{vnet}/subnets/{subnet}
+            subnet_obj = getattr(ipcfg, "subnet", None)
+            subnet_id = getattr(subnet_obj, "id", None) if subnet_obj is not None else None
+            if subnet_id:
+                parts = subnet_id.split("/")
+                for i, part in enumerate(parts):
+                    if part.lower() == "virtualnetworks" and i + 1 < len(parts):
+                        vnet_names.append(parts[i + 1])
+                        break
+
     # OS disk
     os_disk = getattr(vm.storage_profile, "os_disk", None)
     if os_disk:
@@ -94,6 +108,7 @@ def discover_vm_attached_resources(
         nic_names=_dedup(nic_names),
         public_ip_names=_dedup(pip_names),
         nsg_names=_dedup(nsg_names),
+        vnet_names=_dedup(vnet_names),
         disk_names=_dedup(disk_names),
     )
 
@@ -109,6 +124,7 @@ def delete_vm_by_name(
     delete_nics: bool = True,
     delete_public_ips: bool = True,
     delete_nsgs: bool = True,
+    delete_vnets: bool = True,
     delete_disks: bool = True,
     include_data_disks: bool = True,
     discover_attached: bool = True,
@@ -117,14 +133,20 @@ def delete_vm_by_name(
     """
     Deletes a VM by name. If clients aren't provided, it creates them.
     Optionally discovers and deletes attached NIC(s), Public IP(s), NIC NSG(s),
-    and managed disks (OS + data).
+    virtual network(s), and managed disks (OS + data).
     """
 
     if not subscription_id or not network_client or not compute_client:
         credential, subscription_id = get_azure_context()
         credential, resource_client, network_client, compute_client = make_azure_clients(subscription_id)
 
-    attached = VmAttachedResources(nic_names=[], public_ip_names=[], nsg_names=[], disk_names=[])
+    attached = VmAttachedResources(
+        nic_names=[],
+        public_ip_names=[],
+        nsg_names=[],
+        vnet_names=[],
+        disk_names=[],
+    )
 
     # Discover resources BEFORE deleting the VM (after deletion you can’t reliably read references)
     if discover_attached:
@@ -139,7 +161,13 @@ def delete_vm_by_name(
         except ResourceNotFoundError:
             if status_cb:
                 status_cb(f"Skipping missing VM: {vm_name}")
-            attached = VmAttachedResources(nic_names=[], public_ip_names=[], nsg_names=[], disk_names=[])
+            attached = VmAttachedResources(
+                nic_names=[],
+                public_ip_names=[],
+                nsg_names=[],
+                vnet_names=[],
+                disk_names=[],
+            )
         except HttpResponseError as e:
             raise RuntimeError(f"Failed discovering resources for VM '{vm_name}': {e}") from e
 
@@ -193,7 +221,20 @@ def delete_vm_by_name(
             except HttpResponseError as e:
                 raise RuntimeError(f"Failed to delete NSG '{nsg_name}': {e}") from e
 
-    # 5) Delete managed disks (OS disk + data disks)
+    # 5) Delete Virtual Networks attached to VM NIC subnets
+    if delete_vnets:
+        for vnet_name in attached.vnet_names:
+            try:
+                if status_cb:
+                    status_cb(f"Deleting VNet: {vnet_name}")
+                network_client.virtual_networks.begin_delete(resource_group, vnet_name).result()
+            except ResourceNotFoundError:
+                if status_cb:
+                    status_cb(f"VNet already deleted: {vnet_name}")
+            except HttpResponseError as e:
+                raise RuntimeError(f"Failed to delete VNet '{vnet_name}': {e}") from e
+
+    # 6) Delete managed disks (OS disk + data disks)
     if delete_disks:
         for disk_name in attached.disk_names:
             try:
@@ -232,6 +273,7 @@ def delete_vms_by_tags(
       - attached NIC(s)
       - attached Public IP(s)
       - NIC-attached NSG(s)
+      - attached Virtual Network(s)
       - OS disk + (optionally) data disks
 
     Returns: list of VM resource IDs matched (deleted)
