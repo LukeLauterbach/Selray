@@ -172,6 +172,9 @@ def prepare_success_fail(success="", fail=""):
 def destroy_proxies(args):
     from selray.utils import delete_selray_vms, delete_vm_by_name, list_selray_vms
     if isinstance(args.proxy_clean, str):
+        if args.proxy_clean.lower() == "nuke":
+            delete_selray_vms(nuke=True)
+            return
         vms = list_selray_vms(print_output=False)
         match = next((vm for vm in vms if vm.get("name") == args.proxy_clean), None)
         if not match:
