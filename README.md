@@ -91,6 +91,7 @@ Selray can automatically spin up Azure proxies, rotating the proxy IP addresses 
 - **`--proxy-list`** – List Azure instances created.
 - **`--proxy-clean`** – Destroy Azure instances created by you (will also be done automatically at the end of spraying). This will not kill proxies made by other Azure accounts, even in the same Resource Group.
 - **`--proxy-clean {VM NAME}`** – Destroy a specific VM (which can be a VM created by another Azure group)
+- **`--proxy-clean nuke`** – Destroy all VMs tagged with `purpose=selray`, regardless of owner.
 - **`-arg {RESOURCE_GROUP}`** – Azure resource group to create proxies in (or set in en environment variable`AZURE_RG`).
 
 ## 📦 Installation

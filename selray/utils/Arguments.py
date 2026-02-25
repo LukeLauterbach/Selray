@@ -150,7 +150,7 @@ def build_parser() -> ArgumentParser:
         nargs="?",
         const=True,
         default=False,
-        help="(OPTIONAL) Clean up created proxies instead of spraying. Optionally provide a VM name to delete.",
+        help="(OPTIONAL) Clean up created proxies instead of spraying. Optionally provide a VM name, or use 'nuke' to delete all selray VMs regardless of owner.",
     )
     proxy_group.add_argument("--proxy-list", action="store_true",
                              help="(OPTIONAL) List created proxies.")
