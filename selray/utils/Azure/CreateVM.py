@@ -19,6 +19,11 @@ def ensure_rg(resource_client: ResourceManagementClient, resource_group_name) ->
     Try to create/update the resource group if permissions allow.
     Always verify it exists afterward; if it doesn't, raise a fatal error.
     """
+    if not str(resource_group_name or "").strip():
+        raise RuntimeError(
+            "Azure resource group is empty. Pass --azure-resource-group or set AZURE_RG."
+        )
+
     create_error: Exception | None = None
     try:
         resource_client.resource_groups.create_or_update(

@@ -307,3 +307,17 @@ def list_modes(output_to_terminal=True):
             print(f"  • {filename.removesuffix('.toml')}")
 
     return filenames
+
+
+def check_azure_rg(resource_group):
+    resource_group = str(resource_group or "").strip()
+    if resource_group:
+        return resource_group
+
+    resource_group = (os.environ.get("AZURE_RG") or os.environ.get("AZURE_RESOURCE_GROUP") or "").strip()
+    if resource_group:
+        return resource_group
+
+    resource_group = input("No Azure Resource Group detected. Enter the name of your Resource Group: ").strip()
+
+    return resource_group

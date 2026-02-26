@@ -55,11 +55,20 @@ class SprayConfig:
 
     def prepare_azure_variables(self):
         if not self.azure_resource_group:
-            self.azure_resource_group = environ.get("AZURE_RG", "")
+            self.azure_resource_group = (
+                environ.get("AZURE_RG")
+                or environ.get("AZURE_RESOURCE_GROUP")
+                or ""
+            )
         if not self.azure_location:
             self.azure_location = environ.get("AZURE_LOCATION", "eastus")
         if not self.azure_subscription_id:
             self.azure_subscription_id = environ.get("AZURE_SUBSCRIPTION_ID", "")
+
+        # Normalize environment-provided values to avoid whitespace-only input.
+        self.azure_resource_group = str(self.azure_resource_group or "").strip()
+        self.azure_location = str(self.azure_location or "eastus").strip() or "eastus"
+        self.azure_subscription_id = str(self.azure_subscription_id or "").strip()
 
 
     @classmethod
