@@ -19,10 +19,9 @@ def main():
     results = []
     utils.initialize_playwright()
     args = Arguments.parse_args()  # The contents of args is documented in Arguments.py
-
-    # Prepare spray configuration
     args = Arguments.prepare_args(args)
-    spray_config = SprayConfig.from_args(args)
+
+    utils.print_beginning(args, version=__version__)
 
     if args.azure:
         args.azure_resource_group = utils.check_azure_rg(args.azure_resource_group) # Make sure a Resource Group is detected
@@ -31,7 +30,7 @@ def main():
     # Certain modes don't require running the whole script. Check to see if one of those should be executed.
     utils.alternate_modes(args)
 
-    utils.print_beginning(args, version=__version__)
+    spray_config = SprayConfig.from_args(args)
 
     try:
         # Perform credential stuffing, if that's what's in store:
