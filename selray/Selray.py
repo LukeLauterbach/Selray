@@ -25,6 +25,7 @@ def main():
     spray_config = SprayConfig.from_args(args)
 
     if args.azure:
+        args.azure_resource_group = utils.check_azure_rg(args.azure_resource_group) # Make sure a Resource Group is detected
         args.azure_credentials, args.azure_subscription_id = get_azure_context()
 
     # Certain modes don't require running the whole script. Check to see if one of those should be executed.
