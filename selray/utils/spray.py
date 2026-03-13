@@ -91,6 +91,7 @@ def collect_results(queue, processes, total_credentials):
                 message = queue.get(timeout=0.1)
             except Empty:
                 if not any(p.is_alive() for p in processes):
+                    # Workers have exited; remaining queue entries (if any) will be drained after join().
                     break
                 continue
 
@@ -115,9 +116,12 @@ def collect_results(queue, processes, total_credentials):
     for p in processes:
         p.join()
 
-    # Drain any remaining messages that may have arrived after loop exit.
-    while not queue.empty():
-        message = queue.get()
+    # Drain remaining messages using get_nowait; queue.empty() is not reliable across processes.
+    while True:
+        try:
+            message = queue.get_nowait()
+        except Empty:
+            break
         if isinstance(message, dict) and message.get("type") == "log":
             text = message.get("text")
             if text:
