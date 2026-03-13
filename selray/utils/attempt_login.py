@@ -1,7 +1,7 @@
 from patchright.sync_api import Playwright, sync_playwright, expect, Error
 from patchright._impl._errors import TimeoutError
 from datetime import datetime
-from time import sleep
+from time import sleep, monotonic
 
 class Colors:
     HEADER = '\033[95m'
@@ -15,12 +15,25 @@ class Colors:
     UNDERLINE = '\033[4m'
 
 
+def _normalize_match_text(value=""):
+    if value is None:
+        return ""
+    return (
+        str(value)
+        .lower()
+        .replace("’", "'")
+        .replace("‘", "'")
+        .replace("`", "'")
+    )
+
+
 def list_in_string(string_to_check="", list_to_compare=None):
     # Return True if any string from ``list_to_compare`` exists in ``string_to_check``.
     if not list_to_compare:
         return False
+    haystack = _normalize_match_text(string_to_check)
     for comparison_string in list_to_compare:
-        if comparison_string.lower() in string_to_check.lower():
+        if _normalize_match_text(comparison_string) in haystack:
             return True
     return False
 
@@ -171,6 +184,39 @@ def main(spray_config, proxy_url):
                 "RESULT": "PASSWORDLESS",
             }
         elif not spray_config.password:
+            # Username-only mode can race UI error rendering through proxy latency.
+            # Briefly re-check before classifying as VALID USERNAME.
+            recheck_deadline = monotonic() + 2.0
+            while monotonic() < recheck_deadline:
+                sleep(0.25)
+                page_source = page.content().lower()
+                if list_in_string(string_to_check=page_source, list_to_compare=spray_config.invalid_username):
+                    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - USERNAME INVALID: {spray_config.username}")
+                    context.close()
+                    browser.close()
+                    return {
+                        "USERNAME": spray_config.username,
+                        "PASSWORD": spray_config.password,
+                        "RESULT": "INVALID USERNAME",
+                    }
+                if list_in_string(string_to_check=page_source, list_to_compare=spray_config.lockout):
+                    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.WARNING}ACCOUNT LOCKOUT{Colors.END}: {spray_config.username}")
+                    context.close()
+                    browser.close()
+                    return {
+                        "USERNAME": spray_config.username,
+                        "PASSWORD": spray_config.password,
+                        "RESULT": "LOCKED",
+                    }
+                if list_in_string(string_to_check=page_source, list_to_compare=spray_config.passwordless):
+                    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - PASSWORDLESS: {spray_config.username}")
+                    context.close()
+                    browser.close()
+                    return {
+                        "USERNAME": spray_config.username,
+                        "PASSWORD": spray_config.password,
+                        "RESULT": "PASSWORDLESS",
+                    }
             print(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - {Colors.GREEN}VALID USERNAME{Colors.END}: {spray_config.username}")
             context.close()
             browser.close()
