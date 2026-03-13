@@ -238,6 +238,7 @@ def perform_spray(spray_config, credentials, queue):
     results = []
     vm_url = ""
     spray_num_with_current_ip = 0
+    max_error_retries = 2
     log_stream = _QueueLogStream(queue)
 
     with redirect_stdout(log_stream), redirect_stderr(log_stream):
@@ -254,11 +255,36 @@ def perform_spray(spray_config, credentials, queue):
             result = attempt_login.main(spray_config, vm_url)
 
             if spray_config.azure:
-                # If an error was returned, force a proxy IP change
-                if result.get("RESULT") == "ERROR":
-                    spray_num_with_current_ip = 10000
+                retry_count = 0
+                while result.get("RESULT") == "ERROR" and retry_count < max_error_retries:
+                    retry_count += 1
+                    # print(
+                    #     f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - "
+                    #     f"RETRYING after ERROR ({retry_count}/{max_error_retries}): {spray_config.username}"
+                    # )
 
-                # Force rotate on navigation/proxy errors to recover quickly.
+                    # Force a proxy IP change on navigation/proxy errors.
+                    spray_num_with_current_ip = 10000
+                    spray_num_with_current_ip, new_ip, new_url, _ = rotate_ip_if_needed(
+                        spray_config.azure_resource_group,
+                        vm_name,
+                        spray_config.num_sprays_per_ip,
+                        spray_num_with_current_ip,
+                        network_client,
+                        compute_client,
+                        nic_name,
+                        spray_config.azure_location,
+                    )
+
+                    # rotate_ip_if_needed can return null urls and ips, so this just ensures we don't set them to null
+                    if new_url:
+                        vm_url = new_url
+                    if new_ip:
+                        vm_ip = new_ip
+
+                    result = attempt_login.main(spray_config, vm_url)
+
+                # Maintain standard spray/IP rotation cadence after each credential.
                 spray_num_with_current_ip, new_ip, new_url, _ = rotate_ip_if_needed(
                     spray_config.azure_resource_group,
                     vm_name,
@@ -269,16 +295,10 @@ def perform_spray(spray_config, credentials, queue):
                     nic_name,
                     spray_config.azure_location,
                 )
-
-                # rotate_ip_if_needed can return null urls and ips, so this just ensures we don't set them to null
                 if new_url:
                     vm_url = new_url
                 if new_ip:
                     vm_ip = new_ip
-
-                # If an error was encountered, try to log in again
-                if result.get("RESULT") == "ERROR":
-                    result = attempt_login.main(spray_config, vm_url)
 
             results.append(result)
             queue.put({"type": "progress", "count": 1})
