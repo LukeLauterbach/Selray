@@ -64,7 +64,41 @@ def main(spray_config, proxy_url):
     )
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(**launch_kwargs)
+        launch_retries = max(1, int(getattr(spray_config, "launch_retries", 3)))
+        browser = None
+        last_launch_error = None
+        for launch_attempt in range(1, launch_retries + 1):
+            try:
+                browser = p.chromium.launch(**launch_kwargs)
+                break
+            except TimeoutError as e:
+                last_launch_error = e
+                if launch_attempt < launch_retries:
+                    print(
+                        f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - "
+                        f"{Colors.WARNING}WARN{Colors.END}: Browser launch timeout "
+                        f"(attempt {launch_attempt}/{launch_retries}). Retrying..."
+                    )
+                    sleep(launch_attempt)
+                else:
+                    print(
+                        f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - "
+                        f"{Colors.FAIL}ERROR{Colors.END}: Browser launch timeout "
+                        f"after {launch_retries} attempts"
+                    )
+
+        if browser is None:
+            if last_launch_error:
+                print(
+                    f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - "
+                    f"{Colors.FAIL}ERROR{Colors.END}: {last_launch_error}"
+                )
+            return {
+                "USERNAME": spray_config.username,
+                "PASSWORD": spray_config.password,
+                "RESULT": "ERROR",
+            }
+
         context = browser.new_context(ignore_https_errors=True)
         page = context.new_page()
 
