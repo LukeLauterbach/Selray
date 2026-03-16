@@ -47,7 +47,7 @@ def main(spray_config, proxy_url):
     # Playwright setup
     launch_kwargs = {
         "headless": bool(spray_config.headless),
-        "timeout": 15000,  # 15s default for browser contexts and actions
+        "timeout": 60000,  # 60s default for browser launch
     }
     launch_kwargs.setdefault("args", []).append("--ignore-certificate-errors")
     if proxy_url:
