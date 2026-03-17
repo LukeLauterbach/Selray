@@ -117,8 +117,15 @@ def main(spray_config, proxy_url):
                 # keep retrying until max_proxy_wait_s is reached
                 pass
             except Error as e:
-                # Proxy can fail fast; give it a few seconds to come up.
-                if "ERR_PROXY_CONNECTION_FAILED" not in str(e) and "ERR_CONNECTION_RESET" not in str(e):
+                # Some navigation failures surface as generic Error, not TimeoutError.
+                # Treat known transient network/proxy errors as retryable in this loop.
+                err = str(e)
+                transient_nav_errors = (
+                    "ERR_PROXY_CONNECTION_FAILED",
+                    "ERR_CONNECTION_RESET",
+                    "ERR_TIMED_OUT",
+                )
+                if not any(code in err for code in transient_nav_errors):
                     raise
 
             sleep(1)
