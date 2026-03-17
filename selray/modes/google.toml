@@ -5,3 +5,15 @@ fail = "Wrong password"
 invalid_username = "Couldn’t find your Google Account"
 threads = 1
 no_headless = True
+pre_password_code = '''
+from patchright._impl._errors import TimeoutError
+from time import sleep
+
+try:
+    workspace_tile = page.locator('div.l5PPKe', has_text="Google Workspace account").first
+    workspace_tile.wait_for(state="visible", timeout=3000)
+    workspace_tile.click()
+    sleep(1)
+except TimeoutError:
+    pass
+'''
