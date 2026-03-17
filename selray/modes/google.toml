@@ -4,7 +4,7 @@ password_field = 'type="password"'
 fail = "Wrong password"
 invalid_username = "Couldn’t find your Google Account"
 threads = 1
-no_headless = True
+no_headless = true
 pre_password_code = '''
 from patchright._impl._errors import TimeoutError
 from time import sleep
