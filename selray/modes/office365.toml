@@ -21,9 +21,17 @@ except TimeoutError:
 
 # Case 2: "Use your password" button
 try:
-    button = page.get_by_role("button", name="Use your password")
+    button = page.locator(
+        'span[role="button"]:has-text("Use your password"), '
+        '[role="button"]:has-text("Use your password"), '
+        'button:has-text("Use your password"), '
+        'a:has-text("Use your password")'
+    ).first
     button.wait_for(state="visible", timeout=3000)
-    button.click()
+    try:
+        button.click(timeout=2000)
+    except TimeoutError:
+        button.click(force=True)
     sleep(1)
 except TimeoutError:
     pass
