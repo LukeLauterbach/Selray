@@ -1,7 +1,7 @@
 url = "https://login.microsoftonline.com"
 username_field = 'type="email"'
 password_field = 'type="password"'
-fail = "Your account or password is incorrect,That password is incorrect, The password is incorrect"
+fail = "Your account or password is incorrect,That password is incorrect,The password is incorrect,The password is incorrect. Please try again."
 invalid_username = "We couldn't find an account with that username,Enter a valid email address"
 num_sprays_per_ip = 10
 lockout = "password too many times, used an incorrect account or password too many times, it might not be active yet, We can't sign you in"
