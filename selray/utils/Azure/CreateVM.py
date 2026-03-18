@@ -42,11 +42,8 @@ def ensure_rg(resource_client: ResourceManagementClient, resource_group_name) ->
         ) from exc
 
     if create_error is not None:
-        # RG exists but we couldn't create/update it; continue with a clear warning.
-        print(
-            f"[!] Could not create/update resource group '{resource_group_name}' "
-            f"(likely due to permissions). Using existing RG."
-        )
+        # RG exists but create/update was not permitted; continue silently.
+        pass
 
 
 def rand_suffix(n: int = 6) -> str:
