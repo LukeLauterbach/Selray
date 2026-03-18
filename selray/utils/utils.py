@@ -93,7 +93,7 @@ def list_in_string(string_to_check="", list_to_compare=None):
 def prepare_invalid_username(invalid_username=None):
     final_list = ["couldn't find an account with that username", "this username may be incorrect"]
     if invalid_username:
-        invalid_username = invalid_username.split(",")
+        invalid_username = [entry.strip() for entry in invalid_username.split(",") if entry.strip()]
         final_list.extend(invalid_username)
     return final_list
 
@@ -101,7 +101,7 @@ def prepare_invalid_username(invalid_username=None):
 def prepare_passwordless(passwordless_auth=None):
     final_list = ["Get a code to sign in", "Complete sign-in using your passkey"]
     if passwordless_auth:
-        the_list = passwordless_auth.split(",")
+        the_list = [entry.strip() for entry in passwordless_auth.split(",") if entry.strip()]
         final_list.extend(the_list)
     return final_list
 
@@ -109,7 +109,7 @@ def prepare_passwordless(passwordless_auth=None):
 def prepare_lockout(lockout_messages=None):
     final_list = ["account has been locked out", "too many login attempts", "your account is temporarily locked"]
     if lockout_messages:
-        invalid_username = lockout_messages.split(",")
+        invalid_username = [entry.strip() for entry in lockout_messages.split(",") if entry.strip()]
         final_list.extend(invalid_username)
     return final_list
 
@@ -160,10 +160,10 @@ def print_ending(results):
 
 def prepare_success_fail(success="", fail=""):
     if success:
-        success = success.split(",")
+        success = [entry.strip() for entry in success.split(",") if entry.strip()]
         fail = []
     elif fail:
-        fail = fail.split(",")
+        fail = [entry.strip() for entry in fail.split(",") if entry.strip()]
         success = []
 
     return fail, success
