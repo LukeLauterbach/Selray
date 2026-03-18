@@ -305,8 +305,23 @@ def main(spray_config, proxy_url):
         if getattr(spray_config, "post_login_code", None):
             exec(spray_config.post_login_code, {}, locals())
 
-        # Evaluate result
-        page.wait_for_load_state("networkidle")
+        # Evaluate result. Some login pages never reach "networkidle" due to
+        # long-lived background requests, so avoid treating that as fatal.
+        post_submit_timeout_ms = int(getattr(spray_config, "post_submit_timeout_ms", 30000))
+        try:
+            page.wait_for_load_state("domcontentloaded", timeout=post_submit_timeout_ms)
+        except TimeoutError:
+            print(
+                f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - "
+                f"{Colors.WARNING}WARN{Colors.END}: Post-submit DOM load timeout after "
+                f"{post_submit_timeout_ms}ms; continuing with best-effort page inspection."
+            )
+
+        try:
+            page.wait_for_load_state("networkidle", timeout=5000)
+        except TimeoutError:
+            pass
+
         sleep(2)  # allow redirects or async checks
         page_source = page.content().lower()
         # Lockout after submit
