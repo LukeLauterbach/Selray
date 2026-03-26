@@ -1,4 +1,4 @@
-username_field = 'name="identifier'
+username_field = 'name="username"'
 password_field = 'type="password"'
 delay = 120
 fail = 'Unable to sign in'
@@ -7,5 +7,5 @@ post_login_code = '''
 from time import sleep
 sleep(1)
 if "unable to sign in" not in page.content().lower():
-    page.locator("input[type='submit'][value='Sign in']").click()
+    page.locator("input[type='submit'][value='Sign In']").click()
 '''
