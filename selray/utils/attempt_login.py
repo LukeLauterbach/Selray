@@ -171,7 +171,7 @@ def main(spray_config, proxy_url):
         try:
             user_loc.focus()
         except Exception:
-            pass  # focus may fail if already focused; that's fine
+            pass
 
         # Hit Enter on username field to advance
         try:
