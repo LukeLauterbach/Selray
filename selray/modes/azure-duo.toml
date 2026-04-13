@@ -12,7 +12,5 @@ try:
     email.press("Enter")
     sleep(1)
 except PlaywrightTimeoutError:
-    print("Email field not visible in time; continuing.")
-except Exception:
-    traceback.print_exc()  # shows real error details
+    pass
 """
