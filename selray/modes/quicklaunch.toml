@@ -1,0 +1,6 @@
+username_field = 'name="branding-username"'
+password_field = 'name="branding-password"'
+fail = "Invalid username or password"
+post_login_code = """
+page.wait_for_load_state("networkidle")
+"""
