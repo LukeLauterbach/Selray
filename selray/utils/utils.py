@@ -256,6 +256,8 @@ def perform_spray(spray_config, credentials, queue):
             debug_print(getattr(spray_config, "debug", False), f"Creating Azure VM/proxy in resource group '{spray_config.azure_resource_group}'")
             vm_name, vm_url, vm_ip, nic_name, credential, network_client, compute_client, owner = create_selray_vm(
                 spray_config.azure_resource_group,
+                subscription_id=spray_config.azure_subscription_id,
+                location=spray_config.azure_location,
                 debug=getattr(spray_config, "debug", False),
             )
             debug_print(getattr(spray_config, "debug", False), f"Azure proxy ready: vm='{vm_name}' ip='{vm_ip}' url='{vm_url}'")
