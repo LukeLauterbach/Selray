@@ -20,6 +20,48 @@ class VmAttachedResources:
     disk_names: List[str]  # includes OS disk (and optionally data disks)
 
 
+def _delete_resources_parallel(
+    *,
+    names: List[str],
+    kind: str,
+    begin_delete_fn,
+    status_cb: Optional[Callable[[str], None]] = None,
+    max_workers: int = 8,
+) -> None:
+    """
+    Delete same-kind Azure resources in parallel and raise one aggregated error if needed.
+    """
+    if not names:
+        return
+
+    errors: List[str] = []
+    worker_count = max(1, min(max_workers, len(names)))
+
+    def _delete_one(resource_name: str) -> Optional[str]:
+        try:
+            if status_cb:
+                status_cb(f"Deleting {kind}: {resource_name}")
+            begin_delete_fn(resource_name).result()
+            return None
+        except ResourceNotFoundError:
+            if status_cb:
+                status_cb(f"{kind} already deleted: {resource_name}")
+            return None
+        except HttpResponseError as e:
+            return f"{resource_name}: {e}"
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = [executor.submit(_delete_one, n) for n in names]
+        for fut in as_completed(futures):
+            err = fut.result()
+            if err:
+                errors.append(err)
+
+    if errors:
+        preview = "; ".join(errors[:5])
+        raise RuntimeError(f"Failed to delete {len(errors)} {kind}(s). First errors: {preview}")
+
+
 def _parse_name_from_resource_id(resource_id: str) -> str:
     return resource_id.split("/")[-1]
 
@@ -182,70 +224,80 @@ def delete_vm_by_name(
     except HttpResponseError as e:
         raise RuntimeError(f"Failed to delete VM '{vm_name}': {e}") from e
 
-    # 2) Delete NICs
-    if delete_nics:
-        for nic_name in attached.nic_names:
+    # 2) Phase A: delete NICs and disks in parallel (independent once VM is deleted)
+    phase_a_errors: List[str] = []
+    phase_a_workers = []
+    with ThreadPoolExecutor(max_workers=2) as phase_a_executor:
+        if delete_nics and attached.nic_names:
+            phase_a_workers.append(
+                phase_a_executor.submit(
+                    _delete_resources_parallel,
+                    names=attached.nic_names,
+                    kind="NIC",
+                    begin_delete_fn=lambda n: network_client.network_interfaces.begin_delete(resource_group, n),
+                    status_cb=status_cb,
+                )
+            )
+        if delete_disks and attached.disk_names:
+            phase_a_workers.append(
+                phase_a_executor.submit(
+                    _delete_resources_parallel,
+                    names=attached.disk_names,
+                    kind="Disk",
+                    begin_delete_fn=lambda n: compute_client.disks.begin_delete(resource_group, n),
+                    status_cb=status_cb,
+                )
+            )
+        for future in as_completed(phase_a_workers):
             try:
-                if status_cb:
-                    status_cb(f"Deleting NIC: {nic_name}")
-                network_client.network_interfaces.begin_delete(resource_group, nic_name).result()
-            except ResourceNotFoundError:
-                if status_cb:
-                    status_cb(f"NIC already deleted: {nic_name}")
-            except HttpResponseError as e:
-                raise RuntimeError(f"Failed to delete NIC '{nic_name}': {e}") from e
+                future.result()
+            except Exception as e:
+                phase_a_errors.append(str(e))
 
-    # 3) Delete Public IPs
-    if delete_public_ips:
-        for pip_name in attached.public_ip_names:
-            try:
-                if status_cb:
-                    status_cb(f"Deleting Public IP: {pip_name}")
-                network_client.public_ip_addresses.begin_delete(resource_group, pip_name).result()
-            except ResourceNotFoundError:
-                if status_cb:
-                    status_cb(f"Public IP already deleted: {pip_name}")
-            except HttpResponseError as e:
-                raise RuntimeError(f"Failed to delete Public IP '{pip_name}': {e}") from e
+    if phase_a_errors:
+        raise RuntimeError("; ".join(phase_a_errors))
 
-    # 4) Delete NIC-attached NSGs
-    if delete_nsgs:
-        for nsg_name in attached.nsg_names:
+    # 3) Phase B: delete PIPs and NSGs in parallel (after NIC detach/deletion)
+    phase_b_errors: List[str] = []
+    phase_b_workers = []
+    with ThreadPoolExecutor(max_workers=2) as phase_b_executor:
+        if delete_public_ips and attached.public_ip_names:
+            phase_b_workers.append(
+                phase_b_executor.submit(
+                    _delete_resources_parallel,
+                    names=attached.public_ip_names,
+                    kind="Public IP",
+                    begin_delete_fn=lambda n: network_client.public_ip_addresses.begin_delete(resource_group, n),
+                    status_cb=status_cb,
+                )
+            )
+        if delete_nsgs and attached.nsg_names:
+            phase_b_workers.append(
+                phase_b_executor.submit(
+                    _delete_resources_parallel,
+                    names=attached.nsg_names,
+                    kind="NSG",
+                    begin_delete_fn=lambda n: network_client.network_security_groups.begin_delete(resource_group, n),
+                    status_cb=status_cb,
+                )
+            )
+        for future in as_completed(phase_b_workers):
             try:
-                if status_cb:
-                    status_cb(f"Deleting NSG: {nsg_name}")
-                network_client.network_security_groups.begin_delete(resource_group, nsg_name).result()
-            except ResourceNotFoundError:
-                if status_cb:
-                    status_cb(f"NSG already deleted: {nsg_name}")
-            except HttpResponseError as e:
-                raise RuntimeError(f"Failed to delete NSG '{nsg_name}': {e}") from e
+                future.result()
+            except Exception as e:
+                phase_b_errors.append(str(e))
 
-    # 5) Delete Virtual Networks attached to VM NIC subnets
-    if delete_vnets:
-        for vnet_name in attached.vnet_names:
-            try:
-                if status_cb:
-                    status_cb(f"Deleting VNet: {vnet_name}")
-                network_client.virtual_networks.begin_delete(resource_group, vnet_name).result()
-            except ResourceNotFoundError:
-                if status_cb:
-                    status_cb(f"VNet already deleted: {vnet_name}")
-            except HttpResponseError as e:
-                raise RuntimeError(f"Failed to delete VNet '{vnet_name}': {e}") from e
+    if phase_b_errors:
+        raise RuntimeError("; ".join(phase_b_errors))
 
-    # 6) Delete managed disks (OS disk + data disks)
-    if delete_disks:
-        for disk_name in attached.disk_names:
-            try:
-                if status_cb:
-                    status_cb(f"Deleting Disk: {disk_name}")
-                compute_client.disks.begin_delete(resource_group, disk_name).result()
-            except ResourceNotFoundError:
-                if status_cb:
-                    status_cb(f"Disk already deleted: {disk_name}")
-            except HttpResponseError as e:
-                raise RuntimeError(f"Failed to delete disk '{disk_name}': {e}") from e
+    # 4) Phase C: delete VNets last (depends on subnet/NIC lifecycle completion)
+    if delete_vnets and attached.vnet_names:
+        _delete_resources_parallel(
+            names=attached.vnet_names,
+            kind="VNet",
+            begin_delete_fn=lambda n: network_client.virtual_networks.begin_delete(resource_group, n),
+            status_cb=status_cb,
+        )
 
 
 def _resource_group_from_id(resource_id: str) -> str:
