@@ -6,15 +6,59 @@ from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
 from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.compute import ComputeManagementClient
 import os
+import time
 from random import randint
 from string import ascii_lowercase,digits
 from secrets import choice
 import re
+from datetime import datetime
 
 LOCATION = os.environ.get("AZURE_LOCATION", "eastus")
 
 
-def ensure_rg(resource_client: ResourceManagementClient, resource_group_name) -> None:
+def _debug(debug_enabled: bool, message: str) -> None:
+    if not debug_enabled:
+        return
+    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - DEBUG: {message}")
+
+
+def _azure_error_code(exc: Exception) -> str:
+    err = getattr(exc, "error", None)
+    code = getattr(err, "code", None) or getattr(exc, "code", None)
+    return str(code or "").strip()
+
+
+def _is_os_provisioning_timeout(exc: Exception) -> bool:
+    code = _azure_error_code(exc)
+    if code == "OSProvisioningTimedOut":
+        return True
+    return "OSProvisioningTimedOut" in str(exc)
+
+
+def _is_capacity_or_region_full_error(exc: Exception) -> bool:
+    code = _azure_error_code(exc)
+    if code in {
+        "SkuNotAvailable",
+        "AllocationFailed",
+        "ZonalAllocationFailed",
+        "OverconstrainedAllocationRequest",
+        "OperationNotAllowed",
+    }:
+        return True
+
+    msg = str(exc).lower()
+    patterns = (
+        "insufficient capacity",
+        "not enough capacity",
+        "allocation failed",
+        "sku is currently not available",
+        "overconstrained",
+        "zone does not have enough capacity",
+    )
+    return any(p in msg for p in patterns)
+
+
+def ensure_rg(resource_client: ResourceManagementClient, resource_group_name, location: str = LOCATION) -> None:
     """
     Try to create/update the resource group if permissions allow.
     Always verify it exists afterward; if it doesn't, raise a fatal error.
@@ -27,7 +71,7 @@ def ensure_rg(resource_client: ResourceManagementClient, resource_group_name) ->
     create_error: Exception | None = None
     try:
         resource_client.resource_groups.create_or_update(
-            resource_group_name, {"location": LOCATION}
+            resource_group_name, {"location": location}
         )
     except HttpResponseError as exc:
         # Likely permission issue; we'll verify existence below.
@@ -64,7 +108,7 @@ def sanitize_vm_name(name: str, max_len: int = 80) -> str:
     return cleaned
 
 
-def create_networking(network_client: NetworkManagementClient, resource_group):
+def create_networking(network_client: NetworkManagementClient, resource_group, location: str = LOCATION, debug: bool = False):
     suffix = rand_suffix()
 
     vnet_name = f"vnet-proxy-{suffix}"
@@ -73,11 +117,12 @@ def create_networking(network_client: NetworkManagementClient, resource_group):
     pip_name = f"pip-proxy-{suffix}"
     nic_name = f"nic-proxy-{suffix}"
 
+    _debug(debug, f"Creating virtual network '{vnet_name}' in resource group '{resource_group}'")
     network_client.virtual_networks.begin_create_or_update(
         resource_group,
         vnet_name,
         {
-            "location": LOCATION,
+            "location": location,
             "address_space": {"address_prefixes": ["10.10.0.0/16"]},
             "subnets": [{"name": subnet_name, "address_prefix": "10.10.1.0/24"}],
         },
@@ -85,10 +130,11 @@ def create_networking(network_client: NetworkManagementClient, resource_group):
 
     subnet = network_client.subnets.get(resource_group, vnet_name, subnet_name)
 
+    _debug(debug, f"Creating network security group '{nsg_name}' and proxy allow rule")
     nsg = network_client.network_security_groups.begin_create_or_update(
         resource_group,
         nsg_name,
-        {"location": LOCATION},
+        {"location": location},
     ).result()
 
     # Allow Squid ONLY from your public IP
@@ -110,21 +156,23 @@ def create_networking(network_client: NetworkManagementClient, resource_group):
 
     # No SSH rule created. Inbound 22 will not be allowed.
 
+    _debug(debug, f"Creating public IP resource '{pip_name}'")
     pip = network_client.public_ip_addresses.begin_create_or_update(
         resource_group,
         pip_name,
         {
-            "location": LOCATION,
+            "location": location,
             "public_ip_allocation_method": "Static",
             "sku": {"name": "Standard"},
         },
     ).result()
 
+    _debug(debug, f"Creating network interface '{nic_name}'")
     nic = network_client.network_interfaces.begin_create_or_update(
         resource_group,
         nic_name,
         {
-            "location": LOCATION,
+            "location": location,
             "ip_configurations": [
                 {
                     "name": "ipconfig1",
@@ -136,6 +184,7 @@ def create_networking(network_client: NetworkManagementClient, resource_group):
         },
     ).result()
 
+    _debug(debug, f"Created networking resources: nic_id='{nic.id}', pip_id='{pip.id}'")
     return nic.id, nic_name, pip.id, nsg.id, pip_name
 
 
@@ -177,7 +226,7 @@ runcmd:
 """
 
 
-def create_vm(resource_group, compute_client: ComputeManagementClient, nic_id: str, owner="defaultUser", vm_name="") -> None:
+def create_vm(resource_group, compute_client: ComputeManagementClient, nic_id: str, owner="defaultUser", vm_name="", location: str = LOCATION, debug: bool = False) -> None:
     user_data = b64(cloud_init_squid(3128, get_public_ip() + "/32"))
     admin_username = os.environ.get("AZURE_ADMIN_USER", "azureuser")
 
@@ -195,7 +244,7 @@ def create_vm(resource_group, compute_client: ComputeManagementClient, nic_id: s
     }
 
     vm_params = {
-        "location": LOCATION,
+        "location": location,
 
         # 👇 Tags live here (top-level)
         "tags": {
@@ -228,30 +277,93 @@ def create_vm(resource_group, compute_client: ComputeManagementClient, nic_id: s
         },
         "user_data": user_data,
     }
+    _debug(debug, f"VM create request details: location='{location}', vm_size='{vm_params['hardware_profile']['vm_size']}'")
+    vm_size = vm_params["hardware_profile"]["vm_size"]
 
-    compute_client.virtual_machines.begin_create_or_update(
-        resource_group, vm_name, vm_params
-    ).result()
+    _debug(debug, f"Creating VM '{vm_name}' in resource group '{resource_group}'")
+    try:
+        poller = compute_client.virtual_machines.begin_create_or_update(
+            resource_group, vm_name, vm_params
+        )
+    except HttpResponseError as exc:
+        if _is_capacity_or_region_full_error(exc):
+            raise RuntimeError(
+                f"Azure capacity issue creating VM '{vm_name}' in region '{location}' with size '{vm_size}'. "
+                "Try switching regions (set AZURE_LOCATION) or choose a different VM size (set AZURE_VM_SIZE)."
+            ) from exc
+        raise
+
+    # VM creation is a long-running operation. Emit periodic status so it doesn't look hung.
+    vm_create_timeout_s = int(os.environ.get("AZURE_VM_CREATE_TIMEOUT", "1800"))
+    poll_interval_s = int(os.environ.get("AZURE_VM_CREATE_POLL_INTERVAL", "10"))
+    started = time.time()
+    while not poller.done():
+        elapsed = int(time.time() - started)
+        if elapsed > vm_create_timeout_s:
+            raise TimeoutError(
+                f"Timed out after {vm_create_timeout_s}s waiting for VM '{vm_name}' provisioning."
+            )
+        provider_state = "unknown"
+        try:
+            vm = compute_client.virtual_machines.get(resource_group, vm_name)
+            provider_state = getattr(vm, "provisioning_state", "unknown")
+        except Exception:
+            provider_state = "not-visible-yet"
+        _debug(
+            debug,
+            f"VM '{vm_name}' provisioning in progress (elapsed={elapsed}s, sdk_status={poller.status()}, provider_state={provider_state})"
+        )
+        time.sleep(max(1, poll_interval_s))
+
+    try:
+        poller.result()
+        _debug(debug, f"VM '{vm_name}' provisioning completed")
+    except HttpResponseError as exc:
+        if _is_capacity_or_region_full_error(exc):
+            raise RuntimeError(
+                f"Azure capacity issue while provisioning VM '{vm_name}' in region '{location}' with size '{vm_size}'. "
+                "Try switching regions (set AZURE_LOCATION) or choose a different VM size (set AZURE_VM_SIZE)."
+            ) from exc
+        if not _is_os_provisioning_timeout(exc):
+            raise
+        # Azure can return OSProvisioningTimedOut even when the VM later reaches a usable state.
+        print(
+            f"[!] Azure returned OSProvisioningTimedOut for VM '{vm_name}'. "
+            "Continuing and waiting for proxy readiness."
+        )
+        _debug(debug, f"OSProvisioningTimedOut details: {exc}")
 
 
-def create_selray_vm(resource_group, subscription_id="", credential=None):
+def create_selray_vm(resource_group, subscription_id="", credential=None, location: str = LOCATION, debug: bool = False):
     if not subscription_id:
+        _debug(debug, "Azure context missing in create_selray_vm; resolving credentials/subscription")
         credential, subscription_id = get_azure_context()
     cred, resource_client, network_client, compute_client = make_azure_clients(subscription_id)
+    _debug(debug, f"Azure clients created for subscription '{subscription_id}'")
 
-    ensure_rg(resource_client, resource_group)
+    effective_location = str(location or LOCATION).strip() or LOCATION
+    _debug(debug, f"Using Azure location '{effective_location}'")
+    ensure_rg(resource_client, resource_group, location=effective_location)
+    _debug(debug, f"Resource group '{resource_group}' verified")
     owner = get_user()
 
     vm_name = sanitize_vm_name(f"selray-{owner}-{randint(1_000_000, 9_999_999)}")
+    _debug(debug, f"Generated VM name '{vm_name}'")
 
-    nic_id, nic_name, pip_id, _nsg_id, pip_name = create_networking(network_client, resource_group)
-    create_vm(resource_group, compute_client, nic_id, owner=owner, vm_name=vm_name)
+    nic_id, nic_name, pip_id, _nsg_id, pip_name = create_networking(
+        network_client, resource_group, location=effective_location, debug=debug
+    )
+    create_vm(
+        resource_group, compute_client, nic_id, owner=owner, vm_name=vm_name, location=effective_location, debug=debug
+    )
 
     # pip.ip_address will contain the actual IP address
     pip = network_client.public_ip_addresses.get(resource_group, pip_name)
-    #print(f"[+] Initial proxy IP: {pip.ip_address}")
+    _debug(debug, f"VM provisioned; initial proxy IP resource '{pip_name}' resolved to '{pip.ip_address}'")
 
-    if not wait_for_proxy_ready(proxy_ip=pip.ip_address):
+    proxy_ready_timeout = int(os.environ.get("AZURE_PROXY_READY_TIMEOUT", "420"))
+    if not wait_for_proxy_ready(proxy_ip=pip.ip_address, timeout=proxy_ready_timeout, debug=debug):
         raise RuntimeError("Initial proxy health check failed")
 
+    _debug(debug, f"Proxy health check passed for '{pip.ip_address}:3128'")
     return vm_name, f"http://{pip.ip_address}:3128", pip.ip_address, nic_name, credential, network_client, compute_client, owner

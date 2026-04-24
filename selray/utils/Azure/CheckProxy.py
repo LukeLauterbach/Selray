@@ -4,6 +4,12 @@ from urllib.error import URLError, HTTPError
 import time
 
 
+def _debug(debug_enabled: bool, message: str) -> None:
+    if debug_enabled:
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+        print(f"{now} - DEBUG: {message}")
+
+
 def check_proxy_external(proxy_ip: str, proxy_port: int = 3128, timeout: int = 10) -> bool:
     proxy_url = f"http://{proxy_ip}:{proxy_port}"
     test_url = "https://example.com/"
@@ -36,6 +42,7 @@ def wait_for_proxy_ready(
     proxy_port: int = 3128,
     check_interval: int = 5,
     timeout: int = 180,
+    debug: bool = False,
 ) -> bool:
     """
     Waits until the proxy is reachable and working.
@@ -55,10 +62,10 @@ def wait_for_proxy_ready(
             print(f"[!] Proxy not ready after {elapsed}s, giving up")
             return False
 
-        #print(f"[.] Proxy check attempt {attempt} (elapsed {elapsed}s)")
+        _debug(debug, f"Proxy health check attempt {attempt} (elapsed={elapsed}s) for {proxy_ip}:{proxy_port}")
 
         if check_proxy_external(proxy_ip, proxy_port):
-            #print(f"[+] Proxy is ready after {elapsed}s")
+            _debug(debug, f"Proxy became ready after {elapsed}s")
             return True
 
         time.sleep(check_interval)

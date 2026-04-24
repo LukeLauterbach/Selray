@@ -47,6 +47,12 @@ class _QueueLogStream(io.TextIOBase):
             self._buffer = ""
 
 
+def debug_print(debug_enabled, message):
+    if not debug_enabled:
+        return
+    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - DEBUG: {message}")
+
+
 def alternate_modes(args):
     if args.proxy_clean:
         destroy_proxies(args)
@@ -210,6 +216,8 @@ def print_beginning(args, version=None):
     )
 
     if not args.verbose:
+        if getattr(args, "debug", False):
+            print("Debug Mode:                 Enabled")
         print("")
         return
 
@@ -232,6 +240,7 @@ def print_beginning(args, version=None):
     print(f"{'Lockout Condition:':<28}{args.lockout}")
     print(f"{'Threads:':<28}{args.threads}")
     print(f"{'Delay:':<28}{args.delay}")
+    print(f"{'Debug Mode:':<28}{'Enabled' if getattr(args, 'debug', False) else 'Disabled'}")
 
 
 def perform_spray(spray_config, credentials, queue):
@@ -242,22 +251,33 @@ def perform_spray(spray_config, credentials, queue):
     log_stream = _QueueLogStream(queue)
 
     with redirect_stdout(log_stream), redirect_stderr(log_stream):
+        debug_print(getattr(spray_config, "debug", False), f"Worker started with {len(credentials)} credential(s); azure={spray_config.azure}")
         if spray_config.azure:
-            vm_name, vm_url, vm_ip, nic_name, credential, network_client, compute_client, owner = create_selray_vm(spray_config.azure_resource_group)
+            debug_print(getattr(spray_config, "debug", False), f"Creating Azure VM/proxy in resource group '{spray_config.azure_resource_group}'")
+            vm_name, vm_url, vm_ip, nic_name, credential, network_client, compute_client, owner = create_selray_vm(
+                spray_config.azure_resource_group,
+                subscription_id=spray_config.azure_subscription_id,
+                location=spray_config.azure_location,
+                debug=getattr(spray_config, "debug", False),
+            )
+            debug_print(getattr(spray_config, "debug", False), f"Azure proxy ready: vm='{vm_name}' ip='{vm_ip}' url='{vm_url}'")
         for credential in credentials:
             spray_config.username = credential['USERNAME']
             spray_config.password = credential['PASSWORD']
+            debug_print(getattr(spray_config, "debug", False), f"Attempting credential for username='{spray_config.username}'")
 
             # `attempt_login` returns a dictionary with:
             #   - USERNAME
             #   - PASSWORD
             #   - RESULT: one of ["INVALID USERNAME", "LOCKED", "PASSWORDLESS", "VALID USERNAME", "ERROR", "SUCCESS", "FAILURE"]
             result = attempt_login.main(spray_config, vm_url)
+            debug_print(getattr(spray_config, "debug", False), f"attempt_login returned result='{result.get('RESULT')}' for username='{spray_config.username}'")
 
             if spray_config.azure:
                 retry_count = 0
                 while result.get("RESULT") == "ERROR" and retry_count < max_error_retries:
                     retry_count += 1
+                    debug_print(getattr(spray_config, "debug", False), f"Received ERROR; retrying with forced proxy rotation ({retry_count}/{max_error_retries})")
                     # print(
                     #     f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - "
                     #     f"RETRYING after ERROR ({retry_count}/{max_error_retries}): {spray_config.username}"
@@ -274,6 +294,7 @@ def perform_spray(spray_config, credentials, queue):
                         compute_client,
                         nic_name,
                         spray_config.azure_location,
+                        debug=getattr(spray_config, "debug", False),
                     )
 
                     # rotate_ip_if_needed can return null urls and ips, so this just ensures we don't set them to null
@@ -281,8 +302,10 @@ def perform_spray(spray_config, credentials, queue):
                         vm_url = new_url
                     if new_ip:
                         vm_ip = new_ip
+                    debug_print(getattr(spray_config, "debug", False), f"Post-error rotation completed; new_ip='{vm_ip}' new_url='{vm_url}'")
 
                     result = attempt_login.main(spray_config, vm_url)
+                    debug_print(getattr(spray_config, "debug", False), f"Retry attempt_login returned result='{result.get('RESULT')}' for username='{spray_config.username}'")
 
                 # Maintain standard spray/IP rotation cadence after each credential.
                 spray_num_with_current_ip, new_ip, new_url, _ = rotate_ip_if_needed(
@@ -294,18 +317,23 @@ def perform_spray(spray_config, credentials, queue):
                     compute_client,
                     nic_name,
                     spray_config.azure_location,
+                    debug=getattr(spray_config, "debug", False),
                 )
                 if new_url:
                     vm_url = new_url
                 if new_ip:
                     vm_ip = new_ip
+                if new_ip or new_url:
+                    debug_print(getattr(spray_config, "debug", False), f"Scheduled IP rotation applied; current_ip='{vm_ip}'")
 
             results.append(result)
             queue.put({"type": "progress", "count": 1})
 
         queue.put({"type": "results", "data": results})
         if spray_config.azure:
+            debug_print(getattr(spray_config, "debug", False), f"Deleting Azure VM '{vm_name}'")
             delete_vm_by_name(spray_config.azure_resource_group, vm_name)
+            debug_print(getattr(spray_config, "debug", False), f"Deleted Azure VM '{vm_name}'")
 
 
 def initialize_playwright():

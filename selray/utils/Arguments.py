@@ -40,6 +40,7 @@ class SelrayArgs:
     file_prefix: str = ""
     list_modes: bool = False
     verbose: bool = False
+    debug: bool = False
 
     # False -> not used, True -> used without arg, "branch" -> used with arg
     update: Union[bool, str] = False
@@ -143,6 +144,8 @@ def build_parser() -> ArgumentParser:
     )
     optional.add_argument("-v", "--verbose", action="store_true", default=False,
                           help="(OPTIONAL) Verbose mode. Default is False.")
+    optional.add_argument("--debug", action="store_true", default=False,
+                          help="(OPTIONAL) Debug mode. Prints detailed runtime progress logs.")
 
     # Global proxies
     proxy_group.add_argument(
