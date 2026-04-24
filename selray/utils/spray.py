@@ -19,6 +19,11 @@ def main(args, spray_config):
             print(f"Beginning user enumeration")
 
         user_chunks = split_usernames(args)
+        if getattr(args, "debug", False):
+            print(
+                f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - DEBUG: "
+                f"Prepared {len(user_chunks)} worker chunk(s) for {len(args.usernames)} username(s)"
+            )
         results.extend(launch_spray_processes(spray_config, user_chunks, password))
         args.usernames = remove_locked_users(args.usernames, results)
 
@@ -71,6 +76,11 @@ def launch_spray_processes(spray_config, user_chunks, password=None):
                 }
             )
         total_credentials += len(credentials)
+        if getattr(spray_config, "debug", False):
+            print(
+                f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - DEBUG: "
+                f"Starting worker process for {len(credentials)} credential(s)"
+            )
         p = Process(target=utils.perform_spray, args=(spray_config, credentials, queue))
         p.start()
         processes.append(p)

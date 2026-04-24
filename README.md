@@ -43,6 +43,7 @@ Selray includes pre-made modes that simplify the process of spraying specific ta
 * Google
 * Okta
 * OWA - Outlook Web Access (still requires `--url`)
+* QuickLaunch
 * Sophos
 
 A mode can be specified with `-m {NAME}`
@@ -80,6 +81,7 @@ You must also specify either:
 - **`-fp {PREFIX}`** – Prefix for output file names.
 - **`-lm`** – List available built-in modes.
 - **`--update [BRANCH]`** – Update tool (pipx only); optionally specify a branch.
+- **`--debug`** – Enable debug logging to trace runtime flow (including Azure proxy setup and login attempt stages).
 
 ## 🌐 Proxies
 Selray can automatically spin up Azure proxies, rotating the proxy IP addresses and destroying the proxies upon script completion.

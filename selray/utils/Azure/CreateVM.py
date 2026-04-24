@@ -10,8 +10,15 @@ from random import randint
 from string import ascii_lowercase,digits
 from secrets import choice
 import re
+from datetime import datetime
 
 LOCATION = os.environ.get("AZURE_LOCATION", "eastus")
+
+
+def _debug(debug_enabled: bool, message: str) -> None:
+    if not debug_enabled:
+        return
+    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - DEBUG: {message}")
 
 
 def ensure_rg(resource_client: ResourceManagementClient, resource_group_name) -> None:
@@ -64,7 +71,7 @@ def sanitize_vm_name(name: str, max_len: int = 80) -> str:
     return cleaned
 
 
-def create_networking(network_client: NetworkManagementClient, resource_group):
+def create_networking(network_client: NetworkManagementClient, resource_group, debug: bool = False):
     suffix = rand_suffix()
 
     vnet_name = f"vnet-proxy-{suffix}"
@@ -73,6 +80,7 @@ def create_networking(network_client: NetworkManagementClient, resource_group):
     pip_name = f"pip-proxy-{suffix}"
     nic_name = f"nic-proxy-{suffix}"
 
+    _debug(debug, f"Creating virtual network '{vnet_name}' in resource group '{resource_group}'")
     network_client.virtual_networks.begin_create_or_update(
         resource_group,
         vnet_name,
@@ -85,6 +93,7 @@ def create_networking(network_client: NetworkManagementClient, resource_group):
 
     subnet = network_client.subnets.get(resource_group, vnet_name, subnet_name)
 
+    _debug(debug, f"Creating network security group '{nsg_name}' and proxy allow rule")
     nsg = network_client.network_security_groups.begin_create_or_update(
         resource_group,
         nsg_name,
@@ -110,6 +119,7 @@ def create_networking(network_client: NetworkManagementClient, resource_group):
 
     # No SSH rule created. Inbound 22 will not be allowed.
 
+    _debug(debug, f"Creating public IP resource '{pip_name}'")
     pip = network_client.public_ip_addresses.begin_create_or_update(
         resource_group,
         pip_name,
@@ -120,6 +130,7 @@ def create_networking(network_client: NetworkManagementClient, resource_group):
         },
     ).result()
 
+    _debug(debug, f"Creating network interface '{nic_name}'")
     nic = network_client.network_interfaces.begin_create_or_update(
         resource_group,
         nic_name,
@@ -177,7 +188,7 @@ runcmd:
 """
 
 
-def create_vm(resource_group, compute_client: ComputeManagementClient, nic_id: str, owner="defaultUser", vm_name="") -> None:
+def create_vm(resource_group, compute_client: ComputeManagementClient, nic_id: str, owner="defaultUser", vm_name="", debug: bool = False) -> None:
     user_data = b64(cloud_init_squid(3128, get_public_ip() + "/32"))
     admin_username = os.environ.get("AZURE_ADMIN_USER", "azureuser")
 
@@ -229,29 +240,35 @@ def create_vm(resource_group, compute_client: ComputeManagementClient, nic_id: s
         "user_data": user_data,
     }
 
+    _debug(debug, f"Creating VM '{vm_name}' in resource group '{resource_group}'")
     compute_client.virtual_machines.begin_create_or_update(
         resource_group, vm_name, vm_params
     ).result()
 
 
-def create_selray_vm(resource_group, subscription_id="", credential=None):
+def create_selray_vm(resource_group, subscription_id="", credential=None, debug: bool = False):
     if not subscription_id:
+        _debug(debug, "Azure context missing in create_selray_vm; resolving credentials/subscription")
         credential, subscription_id = get_azure_context()
     cred, resource_client, network_client, compute_client = make_azure_clients(subscription_id)
+    _debug(debug, f"Azure clients created for subscription '{subscription_id}'")
 
     ensure_rg(resource_client, resource_group)
+    _debug(debug, f"Resource group '{resource_group}' verified")
     owner = get_user()
 
     vm_name = sanitize_vm_name(f"selray-{owner}-{randint(1_000_000, 9_999_999)}")
+    _debug(debug, f"Generated VM name '{vm_name}'")
 
-    nic_id, nic_name, pip_id, _nsg_id, pip_name = create_networking(network_client, resource_group)
-    create_vm(resource_group, compute_client, nic_id, owner=owner, vm_name=vm_name)
+    nic_id, nic_name, pip_id, _nsg_id, pip_name = create_networking(network_client, resource_group, debug=debug)
+    create_vm(resource_group, compute_client, nic_id, owner=owner, vm_name=vm_name, debug=debug)
 
     # pip.ip_address will contain the actual IP address
     pip = network_client.public_ip_addresses.get(resource_group, pip_name)
-    #print(f"[+] Initial proxy IP: {pip.ip_address}")
+    _debug(debug, f"VM provisioned; initial proxy IP resource '{pip_name}' resolved to '{pip.ip_address}'")
 
-    if not wait_for_proxy_ready(proxy_ip=pip.ip_address):
+    if not wait_for_proxy_ready(proxy_ip=pip.ip_address, debug=debug):
         raise RuntimeError("Initial proxy health check failed")
 
+    _debug(debug, f"Proxy health check passed for '{pip.ip_address}:3128'")
     return vm_name, f"http://{pip.ip_address}:3128", pip.ip_address, nic_name, credential, network_client, compute_client, owner

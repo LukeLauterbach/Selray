@@ -6,6 +6,13 @@ from .AzureAuth import get_azure_context, make_azure_clients
 from azure.core.exceptions import HttpResponseError
 
 
+def _debug(debug_enabled: bool, message: str) -> None:
+    if not debug_enabled:
+        return
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    print(f"{now} - DEBUG: {message}")
+
+
 def _rand_suffix(n: int = 6) -> str:
     alphabet = string.ascii_lowercase + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(n))
@@ -138,15 +145,19 @@ def rotate_ip_if_needed(resource_group,
                         network_client = None,
                         compute_client = None,
                         nic_name = None,
-                        location = "eastus"):
+                        location = "eastus",
+                        debug: bool = False):
 
     if not network_client or not compute_client:
+        _debug(debug, "rotate_ip_if_needed missing Azure clients; creating clients from context")
         credential, subscription_id = get_azure_context()
         cred, resource_client, network_client, compute_client = make_azure_clients(subscription_id)
 
     if current_attempt < attempts_before_rotating:
+        _debug(debug, f"No IP rotation needed yet ({current_attempt + 1}/{attempts_before_rotating})")
         return current_attempt + 1, None, None, None
 
+    _debug(debug, f"Rotating proxy IP for VM '{vm_name}'")
     new_ip, new_pip_name, old_ip, old_pip_name = rotate_public_ip(
         network_client=network_client,
         compute_client=compute_client,
@@ -159,5 +170,6 @@ def rotate_ip_if_needed(resource_group,
     )
 
     new_url = f"http://{new_ip}:3128"
+    _debug(debug, f"IP rotation complete old_ip='{old_ip}' new_ip='{new_ip}' pip='{new_pip_name}'")
 
     return 0, new_ip, new_url, new_pip_name

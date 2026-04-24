@@ -4,7 +4,7 @@ class SprayConfig:
     def __init__(self, url, username_field_key, username_field_value,
                  password_field_key, password_field_value, checkbox_key, checkbox_value,
                  fail, success, invalid_username, num_sprays_per_ip, lockout, threads, pre_login_code, pre_password_code, post_login_code,
-                 passwordless, headless, azure, azure_subscription_id, azure_resource_group, azure_location):
+                 passwordless, headless, azure, azure_subscription_id, azure_resource_group, azure_location, debug=False):
         self.username = None
         self.password = None
         self.url = url
@@ -29,6 +29,7 @@ class SprayConfig:
         self.azure_subscription_id = azure_subscription_id
         self.azure_resource_group = azure_resource_group
         self.azure_location = azure_location
+        self.debug = bool(debug)
 
 
     def prepare_username_fields(self, username_argument_value):
@@ -97,6 +98,7 @@ class SprayConfig:
             azure_subscription_id=getattr(args, "azure_subscription_id", ""),
             azure_resource_group=getattr(args, "azure_resource_group", ""),
             azure_location=getattr(args, "azure_location", ""),
+            debug=getattr(args, "debug", False),
         )
 
         instance.prepare_username_fields(args.username_field)

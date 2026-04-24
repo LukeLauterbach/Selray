@@ -15,6 +15,12 @@ class Colors:
     UNDERLINE = '\033[4m'
 
 
+def _debug(spray_config, message):
+    if not getattr(spray_config, "debug", False):
+        return
+    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - DEBUG: {message}")
+
+
 def _normalize_match_text(value=""):
     if value is None:
         return ""
@@ -45,6 +51,7 @@ def main(spray_config, proxy_url):
     """
 
     # Playwright setup
+    _debug(spray_config, f"attempt_login start for username='{spray_config.username}' with proxy_url='{proxy_url or 'none'}'")
     launch_kwargs = {
         "headless": bool(spray_config.headless),
         "timeout": 60000,  # 60s default for browser launch
@@ -68,8 +75,10 @@ def main(spray_config, proxy_url):
         browser = None
         last_launch_error = None
         for launch_attempt in range(1, launch_retries + 1):
+            _debug(spray_config, f"Launching browser (attempt {launch_attempt}/{launch_retries})")
             try:
                 browser = p.chromium.launch(**launch_kwargs)
+                _debug(spray_config, "Browser launched successfully")
                 break
             except TimeoutError as e:
                 last_launch_error = e
@@ -101,6 +110,7 @@ def main(spray_config, proxy_url):
 
         context = browser.new_context(ignore_https_errors=True)
         page = context.new_page()
+        _debug(spray_config, "Browser context and page created")
 
         # Try to load URL, allowing extra time for proxy connectivity
         nav_ok = False
@@ -109,9 +119,11 @@ def main(spray_config, proxy_url):
         attempts = 0
         while (datetime.now() - started).total_seconds() < max_proxy_wait_s:
             attempts += 1
+            _debug(spray_config, f"Navigation attempt {attempts} to '{spray_config.url}'")
             try:
                 page.goto(spray_config.url, wait_until="load", timeout=15000)
                 nav_ok = True
+                _debug(spray_config, f"Navigation successful after {attempts} attempt(s)")
                 break
             except TimeoutError:
                 # keep retrying until max_proxy_wait_s is reached
@@ -131,6 +143,7 @@ def main(spray_config, proxy_url):
             sleep(1)
 
         if not nav_ok:
+            _debug(spray_config, f"Navigation failed after {attempts} attempt(s) and {max_proxy_wait_s}s max wait")
             # print(
             #     f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - ERROR: {spray_config.username} - "
             #     f"{spray_config.password} (Could not load URL)"
@@ -145,6 +158,7 @@ def main(spray_config, proxy_url):
 
         # Execute Before Code
         if getattr(spray_config, "pre_login_code", None):
+            _debug(spray_config, "Executing pre_login_code")
             exec(spray_config.pre_login_code, {}, locals())
 
         # Wait for username field
@@ -154,6 +168,7 @@ def main(spray_config, proxy_url):
             print(
                 f"ERROR - Could not find the username field with key {spray_config.username_field_key} and value {spray_config.username_field_value}"
             )
+            _debug(spray_config, "Username field was not found before timeout")
             context.close()
             browser.close()
             return {
@@ -165,6 +180,7 @@ def main(spray_config, proxy_url):
         # Fill username
         user_loc = page.locator(f"xpath={user_xpath}")
         user_loc.wait_for(state="visible", timeout=10000)
+        _debug(spray_config, "Username field located; filling value")
         user_loc.fill(spray_config.username)
 
         # Make sure the field has focus before pressing Enter
@@ -178,9 +194,11 @@ def main(spray_config, proxy_url):
             user_loc.press("Enter")
         except Exception:
             page.keyboard.press("Enter")
+        _debug(spray_config, "Username submitted; advancing to password/next stage")
 
         # Execute Before Code
         if getattr(spray_config, "pre_password_code", None):
+            _debug(spray_config, "Executing pre_password_code")
             exec(spray_config.pre_password_code, {}, locals())
 
         frames = []
@@ -192,7 +210,9 @@ def main(spray_config, proxy_url):
         try:
             pw_loc = page.locator(f"xpath={pw_xpath}").first
             pw_loc.wait_for(state="visible", timeout=5000)
+            _debug(spray_config, "Password field detected during early check")
         except TimeoutError:
+            _debug(spray_config, "Password field not yet visible during early check")
             pass
 
         # Early classification checks before password fill
@@ -271,6 +291,7 @@ def main(spray_config, proxy_url):
         try:
             pw_loc = page.locator(f"xpath={pw_xpath}").first
             pw_loc.wait_for(state="visible", timeout=10000)
+            _debug(spray_config, "Password field located; filling password")
         except TimeoutError:
             print(
                 f"ERROR - Could not find the password field with key '{spray_config.password_field_key}' and value '{spray_config.password_field_value}'"
@@ -303,6 +324,7 @@ def main(spray_config, proxy_url):
 
         # Execute Post Login Code
         if getattr(spray_config, "post_login_code", None):
+            _debug(spray_config, "Executing post_login_code")
             exec(spray_config.post_login_code, {}, locals())
 
         # Evaluate result. Some login pages never reach "networkidle" due to
@@ -323,6 +345,7 @@ def main(spray_config, proxy_url):
             pass
 
         sleep(2)  # allow redirects or async checks
+        _debug(spray_config, "Post-submit wait complete; classifying result")
         page_source = page.content().lower()
         # Lockout after submit
         if list_in_string(string_to_check=page_source, list_to_compare=spray_config.lockout):
@@ -361,6 +384,7 @@ def main(spray_config, proxy_url):
         print(
             f"{datetime.now().strftime('%Y-%m-%d %H:%M')} - INCORRECT: {spray_config.username} - {spray_config.password}"
         )
+    _debug(spray_config, f"attempt_login end for username='{spray_config.username}' result='{result}'")
 
     return {
         "USERNAME": spray_config.username,
