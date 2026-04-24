@@ -6,6 +6,7 @@ from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
 from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.compute import ComputeManagementClient
 import os
+import time
 from random import randint
 from string import ascii_lowercase,digits
 from secrets import choice
@@ -19,6 +20,19 @@ def _debug(debug_enabled: bool, message: str) -> None:
     if not debug_enabled:
         return
     print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - DEBUG: {message}")
+
+
+def _azure_error_code(exc: Exception) -> str:
+    err = getattr(exc, "error", None)
+    code = getattr(err, "code", None) or getattr(exc, "code", None)
+    return str(code or "").strip()
+
+
+def _is_os_provisioning_timeout(exc: Exception) -> bool:
+    code = _azure_error_code(exc)
+    if code == "OSProvisioningTimedOut":
+        return True
+    return "OSProvisioningTimedOut" in str(exc)
 
 
 def ensure_rg(resource_client: ResourceManagementClient, resource_group_name) -> None:
@@ -241,9 +255,35 @@ def create_vm(resource_group, compute_client: ComputeManagementClient, nic_id: s
     }
 
     _debug(debug, f"Creating VM '{vm_name}' in resource group '{resource_group}'")
-    compute_client.virtual_machines.begin_create_or_update(
+    poller = compute_client.virtual_machines.begin_create_or_update(
         resource_group, vm_name, vm_params
-    ).result()
+    )
+
+    # VM creation is a long-running operation. Emit periodic status so it doesn't look hung.
+    vm_create_timeout_s = int(os.environ.get("AZURE_VM_CREATE_TIMEOUT", "1800"))
+    poll_interval_s = int(os.environ.get("AZURE_VM_CREATE_POLL_INTERVAL", "10"))
+    started = time.time()
+    while not poller.done():
+        elapsed = int(time.time() - started)
+        if elapsed > vm_create_timeout_s:
+            raise TimeoutError(
+                f"Timed out after {vm_create_timeout_s}s waiting for VM '{vm_name}' provisioning."
+            )
+        _debug(debug, f"VM '{vm_name}' provisioning in progress (elapsed={elapsed}s, sdk_status={poller.status()})")
+        time.sleep(max(1, poll_interval_s))
+
+    try:
+        poller.result()
+        _debug(debug, f"VM '{vm_name}' provisioning completed")
+    except HttpResponseError as exc:
+        if not _is_os_provisioning_timeout(exc):
+            raise
+        # Azure can return OSProvisioningTimedOut even when the VM later reaches a usable state.
+        print(
+            f"[!] Azure returned OSProvisioningTimedOut for VM '{vm_name}'. "
+            "Continuing and waiting for proxy readiness."
+        )
+        _debug(debug, f"OSProvisioningTimedOut details: {exc}")
 
 
 def create_selray_vm(resource_group, subscription_id="", credential=None, debug: bool = False):
@@ -267,7 +307,8 @@ def create_selray_vm(resource_group, subscription_id="", credential=None, debug:
     pip = network_client.public_ip_addresses.get(resource_group, pip_name)
     _debug(debug, f"VM provisioned; initial proxy IP resource '{pip_name}' resolved to '{pip.ip_address}'")
 
-    if not wait_for_proxy_ready(proxy_ip=pip.ip_address, debug=debug):
+    proxy_ready_timeout = int(os.environ.get("AZURE_PROXY_READY_TIMEOUT", "420"))
+    if not wait_for_proxy_ready(proxy_ip=pip.ip_address, timeout=proxy_ready_timeout, debug=debug):
         raise RuntimeError("Initial proxy health check failed")
 
     _debug(debug, f"Proxy health check passed for '{pip.ip_address}:3128'")
