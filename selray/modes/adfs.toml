@@ -1,6 +1,6 @@
 username_field = 'type="email"'
 password_field = 'type="password"'
-fail = "Incorrect user ID or password"
+fail = "Incorrect user ID or password,Sign in using an X.509 certificate"
 pre_login_code = """
 try:
     # Wait up to 5 seconds for the button to be visible and enabled
