@@ -246,39 +246,40 @@ def create_vm(resource_group, compute_client: ComputeManagementClient, nic_id: s
     vm_params = {
         "location": location,
 
-        # 👇 Tags live here (top-level)
+        # Tags live at the top-level for VM resources.
         "tags": {
             "owner": owner,
             "purpose": "selray",
             "project": "proxy-rotation",
         },
 
-        "hardware_profile": {"vm_size": os.environ.get("AZURE_VM_SIZE", "Standard_B1s")},
-        "storage_profile": {"image_reference": image_ref},
-        "os_profile": {
-            "computer_name": vm_name,
-            "admin_username": admin_username,
-            "linux_configuration": {
-                "disable_password_authentication": True,
+        # Use ARM-style field names when passing raw dict payloads.
+        "hardwareProfile": {"vmSize": os.environ.get("AZURE_VM_SIZE", "Standard_B1s")},
+        "storageProfile": {"imageReference": image_ref},
+        "osProfile": {
+            "computerName": vm_name,
+            "adminUsername": admin_username,
+            "linuxConfiguration": {
+                "disablePasswordAuthentication": True,
                 "ssh": {
-                    "public_keys": [
+                    "publicKeys": [
                         {
                             "path": f"/home/{admin_username}/.ssh/authorized_keys",
-                            "key_data": admin_ssh_public_key,
+                            "keyData": admin_ssh_public_key,
                         }
                     ]
                 },
             },
         },
-        "network_profile": {
-            "network_interfaces": [
+        "networkProfile": {
+            "networkInterfaces": [
                 {"id": nic_id, "primary": True}
             ]
         },
-        "user_data": user_data,
+        "userData": user_data,
     }
-    _debug(debug, f"VM create request details: location='{location}', vm_size='{vm_params['hardware_profile']['vm_size']}'")
-    vm_size = vm_params["hardware_profile"]["vm_size"]
+    _debug(debug, f"VM create request details: location='{location}', vm_size='{vm_params['hardwareProfile']['vmSize']}'")
+    vm_size = vm_params["hardwareProfile"]["vmSize"]
 
     _debug(debug, f"Creating VM '{vm_name}' in resource group '{resource_group}'")
     try:
