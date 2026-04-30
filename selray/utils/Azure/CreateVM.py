@@ -227,6 +227,19 @@ runcmd:
 
 
 def create_vm(resource_group, compute_client: ComputeManagementClient, nic_id: str, owner="defaultUser", vm_name="", location: str = LOCATION, debug: bool = False) -> None:
+    from azure.mgmt.compute.models import (
+        HardwareProfile,
+        ImageReference,
+        LinuxConfiguration,
+        NetworkInterfaceReference,
+        NetworkProfile,
+        OSProfile,
+        SshConfiguration,
+        SshPublicKey,
+        StorageProfile,
+        VirtualMachine,
+    )
+
     user_data = b64(cloud_init_squid(3128, get_public_ip() + "/32"))
     admin_username = os.environ.get("AZURE_ADMIN_USER", "azureuser")
 
@@ -243,43 +256,39 @@ def create_vm(resource_group, compute_client: ComputeManagementClient, nic_id: s
         "version": "latest",
     }
 
-    vm_params = {
-        "location": location,
-
-        # Tags live at the top-level for VM resources.
-        "tags": {
+    vm_size = os.environ.get("AZURE_VM_SIZE", "Standard_B1s")
+    vm_params = VirtualMachine(
+        location=location,
+        tags={
             "owner": owner,
             "purpose": "selray",
             "project": "proxy-rotation",
         },
-
-        # Use ARM-style field names when passing raw dict payloads.
-        "hardwareProfile": {"vmSize": os.environ.get("AZURE_VM_SIZE", "Standard_B1s")},
-        "storageProfile": {"imageReference": image_ref},
-        "osProfile": {
-            "computerName": vm_name,
-            "adminUsername": admin_username,
-            "linuxConfiguration": {
-                "disablePasswordAuthentication": True,
-                "ssh": {
-                    "publicKeys": [
-                        {
-                            "path": f"/home/{admin_username}/.ssh/authorized_keys",
-                            "keyData": admin_ssh_public_key,
-                        }
+        hardware_profile=HardwareProfile(vm_size=vm_size),
+        storage_profile=StorageProfile(
+            image_reference=ImageReference(**image_ref)
+        ),
+        os_profile=OSProfile(
+            computer_name=vm_name,
+            admin_username=admin_username,
+            linux_configuration=LinuxConfiguration(
+                disable_password_authentication=True,
+                ssh=SshConfiguration(
+                    public_keys=[
+                        SshPublicKey(
+                            path=f"/home/{admin_username}/.ssh/authorized_keys",
+                            key_data=admin_ssh_public_key,
+                        )
                     ]
-                },
-            },
-        },
-        "networkProfile": {
-            "networkInterfaces": [
-                {"id": nic_id, "primary": True}
-            ]
-        },
-        "userData": user_data,
-    }
-    _debug(debug, f"VM create request details: location='{location}', vm_size='{vm_params['hardwareProfile']['vmSize']}'")
-    vm_size = vm_params["hardwareProfile"]["vmSize"]
+                ),
+            ),
+        ),
+        network_profile=NetworkProfile(
+            network_interfaces=[NetworkInterfaceReference(id=nic_id, primary=True)]
+        ),
+        user_data=user_data,
+    )
+    _debug(debug, f"VM create request details: location='{location}', vm_size='{vm_size}'")
 
     _debug(debug, f"Creating VM '{vm_name}' in resource group '{resource_group}'")
     try:
