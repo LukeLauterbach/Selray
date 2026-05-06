@@ -308,6 +308,15 @@ def _resource_group_from_id(resource_id: str) -> str:
     raise ValueError(f"Could not parse resource group from id: {resource_id}")
 
 
+def _resource_name_from_id(resource_id: str, resource_type: str) -> str:
+    parts = resource_id.split("/")
+    resource_type = resource_type.lower()
+    for i, p in enumerate(parts):
+        if p.lower() == resource_type and i + 1 < len(parts):
+            return parts[i + 1]
+    raise ValueError(f"Could not parse {resource_type} name from id: {resource_id}")
+
+
 def delete_vms_by_tags(
     *,
     subscription_id: str,
@@ -436,6 +445,113 @@ def delete_vms_by_tags(
 
     return deleted_vm_ids
 
+
+def delete_unattached_disks_by_tags(
+    *,
+    subscription_id: str,
+    required_tags: Dict[str, str],
+    credential=None,
+    compute_client=None,
+    max_workers: int = 10,
+) -> List[str]:
+    """
+    Deletes managed disks that match all required tags and are not attached to any VM.
+
+    Azure keeps attached disks protected through the disk's `managed_by` fields.
+    Skipping those fields means stopped/deallocated VMs keep their disks too.
+    """
+    if compute_client is None:
+        if credential is None:
+            credential = DefaultAzureCredential()
+        compute_client = ComputeManagementClient(credential, subscription_id)
+
+    matched: List[Tuple[str, str, str]] = []
+
+    for disk in compute_client.disks.list():
+        disk_tags = getattr(disk, "tags", None) or {}
+        disk_name = getattr(disk, "name", None)
+        disk_id = getattr(disk, "id", None)
+
+        if not disk_name or not disk_id:
+            continue
+
+        if any(disk_tags.get(k) != v for k, v in required_tags.items()):
+            continue
+
+        managed_by = getattr(disk, "managed_by", None)
+        managed_by_extended = getattr(disk, "managed_by_extended", None) or []
+        if managed_by or managed_by_extended:
+            continue
+
+        rg = _resource_group_from_id(disk_id)
+        matched.append((disk_id, disk_name, rg))
+
+    if not matched:
+        return []
+
+    worker_count = max(1, min(max_workers, len(matched)))
+    errors: List[str] = []
+
+    def _delete_one(disk_id: str, disk_name: str, rg: str) -> Tuple[Optional[str], Optional[str]]:
+        try:
+            compute_client.disks.begin_delete(rg, disk_name).result()
+            return disk_id, None
+        except ResourceNotFoundError:
+            return disk_id, None
+        except HttpResponseError as e:
+            return None, f"{disk_name}: {e}"
+
+    deleted_disk_ids: List[str] = []
+
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+    ) as progress:
+        task_id = progress.add_task("Deleting orphaned disks", total=len(matched))
+        if worker_count == 1:
+            for disk_id, disk_name, rg in matched:
+                progress.update(task_id, description=f"Deleting disk: {disk_name}")
+                deleted_id, err = _delete_one(disk_id, disk_name, rg)
+                if deleted_id:
+                    deleted_disk_ids.append(deleted_id)
+                if err:
+                    errors.append(err)
+                progress.advance(task_id, 1)
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                future_to_disk = {
+                    executor.submit(_delete_one, disk_id, disk_name, rg): disk_name
+                    for disk_id, disk_name, rg in matched
+                }
+
+                for future in as_completed(future_to_disk):
+                    disk_name = future_to_disk[future]
+                    try:
+                        deleted_id, err = future.result()
+                        if deleted_id:
+                            deleted_disk_ids.append(deleted_id)
+                        if err:
+                            errors.append(err)
+                            progress.update(task_id, description=f"Failed disk: {disk_name}")
+                        else:
+                            progress.update(task_id, description=f"Deleted disk: {disk_name}")
+                    except Exception as e:
+                        errors.append(f"{disk_name}: {e}")
+                        progress.update(task_id, description=f"Failed disk: {disk_name}")
+                    finally:
+                        progress.advance(task_id, 1)
+
+    if errors:
+        preview = "; ".join(errors[:5])
+        raise RuntimeError(
+            f"Failed to delete {len(errors)} of {len(matched)} disk(s). First errors: {preview}"
+        )
+
+    return deleted_disk_ids
+
+
 def delete_selray_vms(*, nuke: bool = False, max_workers: int = 6) -> List[str]:
     credential, subscription_id = get_azure_context()
     required_tags = {"purpose": "selray"}
@@ -450,3 +566,623 @@ def delete_selray_vms(*, nuke: bool = False, max_workers: int = 6) -> List[str]:
         max_workers=max_workers,
     )
     return deleted
+
+
+def delete_unattached_selray_disks(*, max_workers: int = 10) -> List[str]:
+    credential, subscription_id = get_azure_context()
+    return delete_unattached_disks_by_tags(
+        subscription_id=subscription_id,
+        credential=credential,
+        required_tags={"purpose": "selray"},
+        max_workers=max_workers,
+    )
+
+
+def _vm_is_running(compute_client, resource_group: str, vm_name: str) -> bool:
+    instance_view = compute_client.virtual_machines.instance_view(resource_group, vm_name)
+    for status in getattr(instance_view, "statuses", None) or []:
+        if getattr(status, "code", None) == "PowerState/running":
+            return True
+    return False
+
+
+def _running_vm_vnet_keys(compute_client, network_client) -> set[Tuple[str, str]]:
+    protected_vnets: set[Tuple[str, str]] = set()
+
+    for vm in compute_client.virtual_machines.list_all():
+        vm_name = getattr(vm, "name", None)
+        vm_id = getattr(vm, "id", None)
+        if not vm_name or not vm_id:
+            continue
+
+        vm_rg = _resource_group_from_id(vm_id)
+        try:
+            should_protect = _vm_is_running(compute_client, vm_rg, vm_name)
+        except ResourceNotFoundError:
+            continue
+        except HttpResponseError:
+            should_protect = True
+
+        if not should_protect:
+            continue
+
+        network_profile = getattr(vm, "network_profile", None)
+        for nic_ref in getattr(network_profile, "network_interfaces", None) or []:
+            nic_id = getattr(nic_ref, "id", None)
+            if not nic_id:
+                continue
+
+            try:
+                nic_rg = _resource_group_from_id(nic_id)
+                nic_name = _resource_name_from_id(nic_id, "networkInterfaces")
+                nic = network_client.network_interfaces.get(nic_rg, nic_name)
+            except (ValueError, ResourceNotFoundError, HttpResponseError):
+                continue
+
+            for ipcfg in getattr(nic, "ip_configurations", None) or []:
+                subnet_obj = getattr(ipcfg, "subnet", None)
+                subnet_id = getattr(subnet_obj, "id", None) if subnet_obj is not None else None
+                if not subnet_id:
+                    continue
+                try:
+                    vnet_rg = _resource_group_from_id(subnet_id)
+                    vnet_name = _resource_name_from_id(subnet_id, "virtualNetworks")
+                except ValueError:
+                    continue
+                protected_vnets.add((vnet_rg.lower(), vnet_name.lower()))
+
+    return protected_vnets
+
+
+def _running_vm_public_ip_keys(compute_client, network_client) -> set[Tuple[str, str]]:
+    protected_public_ips: set[Tuple[str, str]] = set()
+
+    for vm in compute_client.virtual_machines.list_all():
+        vm_name = getattr(vm, "name", None)
+        vm_id = getattr(vm, "id", None)
+        if not vm_name or not vm_id:
+            continue
+
+        vm_rg = _resource_group_from_id(vm_id)
+        try:
+            should_protect = _vm_is_running(compute_client, vm_rg, vm_name)
+        except ResourceNotFoundError:
+            continue
+        except HttpResponseError:
+            should_protect = True
+
+        if not should_protect:
+            continue
+
+        network_profile = getattr(vm, "network_profile", None)
+        for nic_ref in getattr(network_profile, "network_interfaces", None) or []:
+            nic_id = getattr(nic_ref, "id", None)
+            if not nic_id:
+                continue
+
+            try:
+                nic_rg = _resource_group_from_id(nic_id)
+                nic_name = _resource_name_from_id(nic_id, "networkInterfaces")
+                nic = network_client.network_interfaces.get(nic_rg, nic_name)
+            except (ValueError, ResourceNotFoundError, HttpResponseError):
+                continue
+
+            for ipcfg in getattr(nic, "ip_configurations", None) or []:
+                pip_obj = getattr(ipcfg, "public_ip_address", None)
+                pip_id = getattr(pip_obj, "id", None) if pip_obj is not None else None
+                if not pip_id:
+                    continue
+                try:
+                    pip_rg = _resource_group_from_id(pip_id)
+                    pip_name = _resource_name_from_id(pip_id, "publicIPAddresses")
+                except ValueError:
+                    continue
+                protected_public_ips.add((pip_rg.lower(), pip_name.lower()))
+
+    return protected_public_ips
+
+
+def _running_vm_nsg_keys(compute_client, network_client) -> set[Tuple[str, str]]:
+    protected_nsgs: set[Tuple[str, str]] = set()
+
+    for vm in compute_client.virtual_machines.list_all():
+        vm_name = getattr(vm, "name", None)
+        vm_id = getattr(vm, "id", None)
+        if not vm_name or not vm_id:
+            continue
+
+        vm_rg = _resource_group_from_id(vm_id)
+        try:
+            should_protect = _vm_is_running(compute_client, vm_rg, vm_name)
+        except ResourceNotFoundError:
+            continue
+        except HttpResponseError:
+            should_protect = True
+
+        if not should_protect:
+            continue
+
+        network_profile = getattr(vm, "network_profile", None)
+        for nic_ref in getattr(network_profile, "network_interfaces", None) or []:
+            nic_id = getattr(nic_ref, "id", None)
+            if not nic_id:
+                continue
+
+            try:
+                nic_rg = _resource_group_from_id(nic_id)
+                nic_name = _resource_name_from_id(nic_id, "networkInterfaces")
+                nic = network_client.network_interfaces.get(nic_rg, nic_name)
+            except (ValueError, ResourceNotFoundError, HttpResponseError):
+                continue
+
+            nsg_obj = getattr(nic, "network_security_group", None)
+            nsg_id = getattr(nsg_obj, "id", None) if nsg_obj is not None else None
+            if not nsg_id:
+                continue
+            try:
+                nsg_rg = _resource_group_from_id(nsg_id)
+                nsg_name = _resource_name_from_id(nsg_id, "networkSecurityGroups")
+            except ValueError:
+                continue
+            protected_nsgs.add((nsg_rg.lower(), nsg_name.lower()))
+
+    return protected_nsgs
+
+
+def _public_ip_nic_ref(public_ip) -> Optional[Tuple[str, str]]:
+    ip_configuration = getattr(public_ip, "ip_configuration", None)
+    ip_configuration_id = getattr(ip_configuration, "id", None) if ip_configuration is not None else None
+    if not ip_configuration_id:
+        return None
+
+    try:
+        return (
+            _resource_group_from_id(ip_configuration_id),
+            _resource_name_from_id(ip_configuration_id, "networkInterfaces"),
+        )
+    except ValueError:
+        return None
+
+
+def _remove_public_ip_from_nic(network_client, resource_group: str, nic_name: str, public_ip_id: str) -> None:
+    nic = network_client.network_interfaces.get(resource_group, nic_name)
+    changed = False
+    for ipcfg in getattr(nic, "ip_configurations", None) or []:
+        pip_obj = getattr(ipcfg, "public_ip_address", None)
+        pip_id = getattr(pip_obj, "id", None) if pip_obj is not None else None
+        if pip_id and pip_id.lower() == public_ip_id.lower():
+            ipcfg.public_ip_address = None
+            changed = True
+
+    if changed:
+        network_client.network_interfaces.begin_create_or_update(resource_group, nic_name, nic).result()
+
+
+def _detach_nsg_from_proxy_nics(network_client, resource_group: str, nsg_id: str) -> None:
+    for nic in network_client.network_interfaces.list(resource_group):
+        nic_name = getattr(nic, "name", None)
+        if not nic_name or not nic_name.lower().startswith("nic-proxy-"):
+            continue
+
+        nsg_obj = getattr(nic, "network_security_group", None)
+        attached_nsg_id = getattr(nsg_obj, "id", None) if nsg_obj is not None else None
+        if not attached_nsg_id or attached_nsg_id.lower() != nsg_id.lower():
+            continue
+
+        nic.network_security_group = None
+        network_client.network_interfaces.begin_create_or_update(resource_group, nic_name, nic).result()
+
+
+def _nic_uses_vnet(nic, resource_group: str, vnet_name: str) -> bool:
+    for ipcfg in getattr(nic, "ip_configurations", None) or []:
+        subnet_obj = getattr(ipcfg, "subnet", None)
+        subnet_id = getattr(subnet_obj, "id", None) if subnet_obj is not None else None
+        if not subnet_id:
+            continue
+        try:
+            subnet_rg = _resource_group_from_id(subnet_id)
+            subnet_vnet = _resource_name_from_id(subnet_id, "virtualNetworks")
+        except ValueError:
+            continue
+        if subnet_rg.lower() == resource_group.lower() and subnet_vnet.lower() == vnet_name.lower():
+            return True
+    return False
+
+
+def _discover_proxy_nic_dependencies_for_vnet(network_client, resource_group: str, vnet_name: str) -> VmAttachedResources:
+    nic_names: List[str] = []
+    pip_names: List[str] = []
+    nsg_names: List[str] = []
+
+    for nic in network_client.network_interfaces.list(resource_group):
+        nic_name = getattr(nic, "name", None)
+        if not nic_name or not nic_name.lower().startswith("nic-proxy-"):
+            continue
+        if not _nic_uses_vnet(nic, resource_group, vnet_name):
+            continue
+
+        nic_names.append(nic_name)
+
+        nsg_obj = getattr(nic, "network_security_group", None)
+        nsg_id = getattr(nsg_obj, "id", None) if nsg_obj is not None else None
+        if nsg_id:
+            nsg_names.append(_parse_name_from_resource_id(nsg_id))
+
+        for ipcfg in getattr(nic, "ip_configurations", None) or []:
+            pip_obj = getattr(ipcfg, "public_ip_address", None)
+            pip_id = getattr(pip_obj, "id", None) if pip_obj is not None else None
+            if pip_id:
+                pip_names.append(_parse_name_from_resource_id(pip_id))
+
+    return VmAttachedResources(
+        nic_names=_dedup(nic_names),
+        public_ip_names=_dedup(pip_names),
+        nsg_names=_dedup(nsg_names),
+        vnet_names=[],
+        disk_names=[],
+    )
+
+
+def delete_unused_proxy_public_ips(
+    *,
+    subscription_id: str,
+    credential=None,
+    compute_client=None,
+    network_client=None,
+    name_prefix: str = "pip-proxy-",
+    max_workers: int = 10,
+) -> List[str]:
+    """
+    Deletes proxy public IPs by name prefix unless a currently running VM uses them.
+    """
+    if compute_client is None or network_client is None:
+        if credential is None:
+            credential = DefaultAzureCredential()
+        if compute_client is None:
+            compute_client = ComputeManagementClient(credential, subscription_id)
+        if network_client is None:
+            network_client = NetworkManagementClient(credential, subscription_id)
+
+    protected_public_ips = _running_vm_public_ip_keys(compute_client, network_client)
+    matched: List[Tuple[str, str, str]] = []
+
+    for public_ip in network_client.public_ip_addresses.list_all():
+        pip_name = getattr(public_ip, "name", None)
+        pip_id = getattr(public_ip, "id", None)
+        if not pip_name or not pip_id:
+            continue
+        if not pip_name.lower().startswith(name_prefix.lower()):
+            continue
+
+        rg = _resource_group_from_id(pip_id)
+        if (rg.lower(), pip_name.lower()) in protected_public_ips:
+            continue
+
+        matched.append((pip_id, pip_name, rg))
+
+    if not matched:
+        return []
+
+    worker_count = max(1, min(max_workers, len(matched)))
+    deleted_public_ip_ids: List[str] = []
+    errors: List[str] = []
+
+    def _delete_one(pip_id: str, pip_name: str, rg: str) -> Tuple[Optional[str], Optional[str]]:
+        try:
+            public_ip = network_client.public_ip_addresses.get(rg, pip_name)
+            nic_ref = _public_ip_nic_ref(public_ip)
+            if nic_ref:
+                nic_rg, nic_name = nic_ref
+                if nic_name.lower().startswith("nic-proxy-"):
+                    _remove_public_ip_from_nic(network_client, nic_rg, nic_name, pip_id)
+
+            network_client.public_ip_addresses.begin_delete(rg, pip_name).result()
+            return pip_id, None
+        except ResourceNotFoundError:
+            return pip_id, None
+        except Exception as e:
+            return None, f"{pip_name}: {e}"
+
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+    ) as progress:
+        task_id = progress.add_task("Deleting unused proxy public IPs", total=len(matched))
+        if worker_count == 1:
+            for pip_id, pip_name, rg in matched:
+                progress.update(task_id, description=f"Deleting Public IP: {pip_name}")
+                deleted_id, err = _delete_one(pip_id, pip_name, rg)
+                if deleted_id:
+                    deleted_public_ip_ids.append(deleted_id)
+                if err:
+                    errors.append(err)
+                progress.advance(task_id, 1)
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                future_to_public_ip = {
+                    executor.submit(_delete_one, pip_id, pip_name, rg): pip_name
+                    for pip_id, pip_name, rg in matched
+                }
+
+                for future in as_completed(future_to_public_ip):
+                    pip_name = future_to_public_ip[future]
+                    try:
+                        deleted_id, err = future.result()
+                        if deleted_id:
+                            deleted_public_ip_ids.append(deleted_id)
+                        if err:
+                            errors.append(err)
+                            progress.update(task_id, description=f"Failed Public IP: {pip_name}")
+                        else:
+                            progress.update(task_id, description=f"Deleted Public IP: {pip_name}")
+                    except Exception as e:
+                        errors.append(f"{pip_name}: {e}")
+                        progress.update(task_id, description=f"Failed Public IP: {pip_name}")
+                    finally:
+                        progress.advance(task_id, 1)
+
+    if errors:
+        preview = "; ".join(errors[:5])
+        raise RuntimeError(
+            f"Failed to delete {len(errors)} of {len(matched)} public IP(s). First errors: {preview}"
+        )
+
+    return deleted_public_ip_ids
+
+
+def delete_unused_proxy_public_ips_for_cleanup(*, max_workers: int = 10) -> List[str]:
+    credential, subscription_id = get_azure_context()
+    return delete_unused_proxy_public_ips(
+        subscription_id=subscription_id,
+        credential=credential,
+        name_prefix="pip-proxy-",
+        max_workers=max_workers,
+    )
+
+
+def delete_unused_proxy_nsgs(
+    *,
+    subscription_id: str,
+    credential=None,
+    compute_client=None,
+    network_client=None,
+    name_prefix: str = "nsg-proxy-",
+    max_workers: int = 10,
+) -> List[str]:
+    """
+    Deletes proxy NSGs by name prefix unless a currently running VM uses them.
+    """
+    if compute_client is None or network_client is None:
+        if credential is None:
+            credential = DefaultAzureCredential()
+        if compute_client is None:
+            compute_client = ComputeManagementClient(credential, subscription_id)
+        if network_client is None:
+            network_client = NetworkManagementClient(credential, subscription_id)
+
+    protected_nsgs = _running_vm_nsg_keys(compute_client, network_client)
+    matched: List[Tuple[str, str, str]] = []
+
+    for nsg in network_client.network_security_groups.list_all():
+        nsg_name = getattr(nsg, "name", None)
+        nsg_id = getattr(nsg, "id", None)
+        if not nsg_name or not nsg_id:
+            continue
+        if not nsg_name.lower().startswith(name_prefix.lower()):
+            continue
+
+        rg = _resource_group_from_id(nsg_id)
+        if (rg.lower(), nsg_name.lower()) in protected_nsgs:
+            continue
+
+        matched.append((nsg_id, nsg_name, rg))
+
+    if not matched:
+        return []
+
+    worker_count = max(1, min(max_workers, len(matched)))
+    deleted_nsg_ids: List[str] = []
+    errors: List[str] = []
+
+    def _delete_one(nsg_id: str, nsg_name: str, rg: str) -> Tuple[Optional[str], Optional[str]]:
+        try:
+            _detach_nsg_from_proxy_nics(network_client, rg, nsg_id)
+            network_client.network_security_groups.begin_delete(rg, nsg_name).result()
+            return nsg_id, None
+        except ResourceNotFoundError:
+            return nsg_id, None
+        except Exception as e:
+            return None, f"{nsg_name}: {e}"
+
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+    ) as progress:
+        task_id = progress.add_task("Deleting unused proxy NSGs", total=len(matched))
+        if worker_count == 1:
+            for nsg_id, nsg_name, rg in matched:
+                progress.update(task_id, description=f"Deleting NSG: {nsg_name}")
+                deleted_id, err = _delete_one(nsg_id, nsg_name, rg)
+                if deleted_id:
+                    deleted_nsg_ids.append(deleted_id)
+                if err:
+                    errors.append(err)
+                progress.advance(task_id, 1)
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                future_to_nsg = {
+                    executor.submit(_delete_one, nsg_id, nsg_name, rg): nsg_name
+                    for nsg_id, nsg_name, rg in matched
+                }
+
+                for future in as_completed(future_to_nsg):
+                    nsg_name = future_to_nsg[future]
+                    try:
+                        deleted_id, err = future.result()
+                        if deleted_id:
+                            deleted_nsg_ids.append(deleted_id)
+                        if err:
+                            errors.append(err)
+                            progress.update(task_id, description=f"Failed NSG: {nsg_name}")
+                        else:
+                            progress.update(task_id, description=f"Deleted NSG: {nsg_name}")
+                    except Exception as e:
+                        errors.append(f"{nsg_name}: {e}")
+                        progress.update(task_id, description=f"Failed NSG: {nsg_name}")
+                    finally:
+                        progress.advance(task_id, 1)
+
+    if errors:
+        preview = "; ".join(errors[:5])
+        raise RuntimeError(
+            f"Failed to delete {len(errors)} of {len(matched)} NSG(s). First errors: {preview}"
+        )
+
+    return deleted_nsg_ids
+
+
+def delete_unused_proxy_nsgs_for_cleanup(*, max_workers: int = 10) -> List[str]:
+    credential, subscription_id = get_azure_context()
+    return delete_unused_proxy_nsgs(
+        subscription_id=subscription_id,
+        credential=credential,
+        name_prefix="nsg-proxy-",
+        max_workers=max_workers,
+    )
+
+
+def delete_unused_proxy_vnets(
+    *,
+    subscription_id: str,
+    credential=None,
+    compute_client=None,
+    network_client=None,
+    name_prefix: str = "vnet-proxy-",
+    max_workers: int = 10,
+) -> List[str]:
+    """
+    Deletes proxy VNets by name prefix unless a currently running VM uses them.
+    """
+    if compute_client is None or network_client is None:
+        if credential is None:
+            credential = DefaultAzureCredential()
+        if compute_client is None:
+            compute_client = ComputeManagementClient(credential, subscription_id)
+        if network_client is None:
+            network_client = NetworkManagementClient(credential, subscription_id)
+
+    protected_vnets = _running_vm_vnet_keys(compute_client, network_client)
+    matched: List[Tuple[str, str, str]] = []
+
+    for vnet in network_client.virtual_networks.list_all():
+        vnet_name = getattr(vnet, "name", None)
+        vnet_id = getattr(vnet, "id", None)
+        if not vnet_name or not vnet_id:
+            continue
+        if not vnet_name.startswith(name_prefix):
+            continue
+
+        rg = _resource_group_from_id(vnet_id)
+        if (rg.lower(), vnet_name.lower()) in protected_vnets:
+            continue
+
+        matched.append((vnet_id, vnet_name, rg))
+
+    if not matched:
+        return []
+
+    worker_count = max(1, min(max_workers, len(matched)))
+    deleted_vnet_ids: List[str] = []
+    errors: List[str] = []
+
+    def _delete_one(vnet_id: str, vnet_name: str, rg: str) -> Tuple[Optional[str], Optional[str]]:
+        try:
+            dependencies = _discover_proxy_nic_dependencies_for_vnet(network_client, rg, vnet_name)
+            _delete_resources_parallel(
+                names=dependencies.nic_names,
+                kind="NIC",
+                begin_delete_fn=lambda n: network_client.network_interfaces.begin_delete(rg, n),
+                max_workers=max_workers,
+            )
+            _delete_resources_parallel(
+                names=dependencies.public_ip_names,
+                kind="Public IP",
+                begin_delete_fn=lambda n: network_client.public_ip_addresses.begin_delete(rg, n),
+                max_workers=max_workers,
+            )
+            _delete_resources_parallel(
+                names=dependencies.nsg_names,
+                kind="NSG",
+                begin_delete_fn=lambda n: network_client.network_security_groups.begin_delete(rg, n),
+                max_workers=max_workers,
+            )
+            network_client.virtual_networks.begin_delete(rg, vnet_name).result()
+            return vnet_id, None
+        except ResourceNotFoundError:
+            return vnet_id, None
+        except HttpResponseError as e:
+            return None, f"{vnet_name}: {e}"
+        except Exception as e:
+            return None, f"{vnet_name}: {e}"
+
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+    ) as progress:
+        task_id = progress.add_task("Deleting unused proxy VNets", total=len(matched))
+        if worker_count == 1:
+            for vnet_id, vnet_name, rg in matched:
+                progress.update(task_id, description=f"Deleting VNet: {vnet_name}")
+                deleted_id, err = _delete_one(vnet_id, vnet_name, rg)
+                if deleted_id:
+                    deleted_vnet_ids.append(deleted_id)
+                if err:
+                    errors.append(err)
+                progress.advance(task_id, 1)
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                future_to_vnet = {
+                    executor.submit(_delete_one, vnet_id, vnet_name, rg): vnet_name
+                    for vnet_id, vnet_name, rg in matched
+                }
+
+                for future in as_completed(future_to_vnet):
+                    vnet_name = future_to_vnet[future]
+                    try:
+                        deleted_id, err = future.result()
+                        if deleted_id:
+                            deleted_vnet_ids.append(deleted_id)
+                        if err:
+                            errors.append(err)
+                            progress.update(task_id, description=f"Failed VNet: {vnet_name}")
+                        else:
+                            progress.update(task_id, description=f"Deleted VNet: {vnet_name}")
+                    except Exception as e:
+                        errors.append(f"{vnet_name}: {e}")
+                        progress.update(task_id, description=f"Failed VNet: {vnet_name}")
+                    finally:
+                        progress.advance(task_id, 1)
+
+    if errors:
+        preview = "; ".join(errors[:5])
+        raise RuntimeError(
+            f"Failed to delete {len(errors)} of {len(matched)} VNet(s). First errors: {preview}"
+        )
+
+    return deleted_vnet_ids
+
+
+def delete_unused_proxy_vnets_for_cleanup(*, max_workers: int = 10) -> List[str]:
+    credential, subscription_id = get_azure_context()
+    return delete_unused_proxy_vnets(
+        subscription_id=subscription_id,
+        credential=credential,
+        name_prefix="vnet-proxy-",
+        max_workers=max_workers,
+    )
