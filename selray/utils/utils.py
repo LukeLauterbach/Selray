@@ -176,19 +176,59 @@ def prepare_success_fail(success="", fail=""):
 
 
 def destroy_proxies(args):
-    from selray.utils import delete_selray_vms, delete_vm_by_name, list_selray_vms
-    if isinstance(args.proxy_clean, str):
-        if args.proxy_clean.lower() == "nuke":
-            delete_selray_vms(nuke=True)
-            return
-        vms = list_selray_vms(print_output=False)
-        match = next((vm for vm in vms if vm.get("name") == args.proxy_clean), None)
-        if not match:
-            print(f"No VM found with name: {args.proxy_clean}")
-            return
-        delete_vm_by_name(match["resource_group"], match["name"])
-    else:
-        delete_selray_vms()
+    from selray.utils import delete_selray_vms, delete_unattached_selray_disks, delete_unused_proxy_nsgs_for_cleanup, delete_unused_proxy_public_ips_for_cleanup, delete_unused_proxy_vnets_for_cleanup, delete_vm_by_name, list_selray_vms
+    cleanup_error = None
+    disk_cleanup_error = None
+    public_ip_cleanup_error = None
+    nsg_cleanup_error = None
+    vnet_cleanup_error = None
+
+    try:
+        if isinstance(args.proxy_clean, str):
+            if args.proxy_clean.lower() == "nuke":
+                delete_selray_vms(nuke=True)
+            else:
+                vms = list_selray_vms(print_output=False)
+                match = next((vm for vm in vms if vm.get("name") == args.proxy_clean), None)
+                if not match:
+                    print(f"No VM found with name: {args.proxy_clean}")
+                else:
+                    delete_vm_by_name(match["resource_group"], match["name"])
+        else:
+            delete_selray_vms()
+    except Exception as e:
+        cleanup_error = e
+    finally:
+        try:
+            delete_unattached_selray_disks()
+        except Exception as e:
+            disk_cleanup_error = e
+        try:
+            delete_unused_proxy_public_ips_for_cleanup()
+        except Exception as e:
+            public_ip_cleanup_error = e
+        try:
+            delete_unused_proxy_nsgs_for_cleanup()
+        except Exception as e:
+            nsg_cleanup_error = e
+        try:
+            delete_unused_proxy_vnets_for_cleanup()
+        except Exception as e:
+            vnet_cleanup_error = e
+
+    errors = []
+    if cleanup_error:
+        errors.append(f"Proxy cleanup failed: {cleanup_error}")
+    if disk_cleanup_error:
+        errors.append(f"Disk cleanup failed: {disk_cleanup_error}")
+    if public_ip_cleanup_error:
+        errors.append(f"Public IP cleanup failed: {public_ip_cleanup_error}")
+    if nsg_cleanup_error:
+        errors.append(f"NSG cleanup failed: {nsg_cleanup_error}")
+    if vnet_cleanup_error:
+        errors.append(f"VNet cleanup failed: {vnet_cleanup_error}")
+    if errors:
+        raise RuntimeError(". ".join(errors)) from cleanup_error
 
 
 def list_proxies(args):
