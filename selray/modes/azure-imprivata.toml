@@ -1,0 +1,17 @@
+username_field = 'name="username"'
+password_field = 'type="password"'
+invalid_username = "The information you entered did not match our"
+fail = "The information you entered did not match our"
+url = "https://portal.azure.com"
+pre_login_code = """
+from patchright.sync_api import TimeoutError as PlaywrightTimeoutError
+from time import sleep
+try:
+    email = page.locator('input[type="email"]')
+    email.wait_for(state="visible", timeout=15_000)
+    email.fill(f"{spray_config.username}")
+    email.press("Enter")
+    sleep(1)
+except PlaywrightTimeoutError:
+    pass
+"""
