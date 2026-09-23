@@ -1,4 +1,4 @@
-username_field = 'name="username"'
+username_field = 'name="identifier"'
 password_field = 'type="password"'
 delay = 120
 fail = 'Unable to sign in'
