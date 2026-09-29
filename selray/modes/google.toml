@@ -2,7 +2,7 @@ url = "https://accounts.google.com"
 username_field = 'id="identifierId"'
 password_field = 'type="password"'
 fail = "Wrong password"
-invalid_username = "Couldn’t find your Google Account"
+invalid_username = "Couldn’t find your Google Account,Couldn’t find this account"
 threads = 1
 no_headless = true
 pre_password_code = '''
